@@ -26,7 +26,9 @@ export interface LakeTableDef {
 const common: LakeColumn[] = [
   { name: "event_id", type: "string", required: true },
   { name: "tenant_id", type: "string", required: true },
-  { name: "member_id", type: "string", required: true },
+  // Null for connector rows whose author hasn't linked an account; actor_key is set then.
+  { name: "member_id", type: "string" },
+  { name: "actor_key", type: "string" },
   { name: "agent_id", type: "string" },
   { name: "source", type: "string", required: true },
 ];
@@ -67,6 +69,20 @@ export const LAKE_TABLE_DEFS: Record<LakeTableName, LakeTableDef> = {
       { name: "features", type: "string", required: true },
       { name: "started_at", type: "timestamptz" },
       { name: "completed_at", type: "timestamptz" },
+      ...times,
+    ],
+    partitions: byDay,
+  },
+  task_categories: {
+    name: "task_categories",
+    columns: [
+      ...common,
+      { name: "task_id", type: "string", required: true },
+      { name: "pack", type: "string", required: true },
+      { name: "category", type: "string", required: true },
+      /** rule, hint, llm or fallback. */
+      { name: "method", type: "string", required: true },
+      { name: "confidence", type: "double", required: true },
       ...times,
     ],
     partitions: byDay,

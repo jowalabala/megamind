@@ -1,5 +1,10 @@
 import type { LakeTableName } from "./tables.ts";
 
+export interface ErasureSubject {
+  memberId: string;
+  actorKeys: string[];
+}
+
 /** One outbox row on its way to the lake. */
 export interface OutboxRecord {
   /** Outbox row id; reported back when that record failed. */
@@ -29,9 +34,10 @@ export interface LakeActionRow {
 /** Tenant-scoped reads and deletes on the lake (Athena in AWS). */
 export interface LakeAdmin {
   tableCounts(tenantId: string): Promise<LakeCounts>;
-  memberRowCounts(tenantId: string, memberId: string): Promise<LakeCounts>;
+  /** Rows of one person: their member id, or any of their external identities (actor keys). */
+  memberRowCounts(tenantId: string, subject: ErasureSubject): Promise<LakeCounts>;
   /** Logical delete: the rows disappear from every query now; old snapshots expire later. */
-  deleteMemberRows(tenantId: string, memberId: string): Promise<void>;
+  deleteMemberRows(tenantId: string, subject: ErasureSubject): Promise<void>;
   recentActions(
     tenantId: string,
     options?: { limit?: number; resource?: string },

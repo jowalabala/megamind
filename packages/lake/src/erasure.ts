@@ -46,10 +46,11 @@ export async function processErasures(options: ErasureOptions): Promise<number> 
     for (const req of due) {
       const ctx = { tenantId: tenant.tenantId, requestId: req.id };
       const lake = tenant.lakeReady || !options.requireProvisioned ? options.lake : null;
+      const subject = { memberId: req.subjectMemberId, actorKeys: req.subjectActorKeys };
       try {
         if (req.status === "pending") {
           await options.deleteRaw(tenant.tenantId, req.subjectMemberId);
-          if (lake) await lake.deleteMemberRows(tenant.tenantId, req.subjectMemberId);
+          if (lake) await lake.deleteMemberRows(tenant.tenantId, subject);
           const t = now();
           await options.db.withTenant(tenant.tenantId, async (tx) => {
             await erasureRepo.updateErasureRequest(tx, req.id, {
@@ -71,8 +72,8 @@ export async function processErasures(options: ErasureOptions): Promise<number> 
         } else {
           let remaining = 0;
           if (lake) {
-            await lake.deleteMemberRows(tenant.tenantId, req.subjectMemberId);
-            const counts = await lake.memberRowCounts(tenant.tenantId, req.subjectMemberId);
+            await lake.deleteMemberRows(tenant.tenantId, subject);
+            const counts = await lake.memberRowCounts(tenant.tenantId, subject);
             remaining = Object.values(counts).reduce((a, b) => a + b, 0);
             if (remaining > 0) throw new Error(`${remaining} lake rows remain after delete`);
           }

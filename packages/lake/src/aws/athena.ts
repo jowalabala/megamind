@@ -17,7 +17,7 @@ import { AssumeRoleCommand, STSClient } from "@aws-sdk/client-sts";
 import { assertTenantId } from "@mm/db";
 import { s3TablesCatalog, tenantNamespace, tenantRoleArn, tenantWorkgroup } from "../naming.ts";
 import { LAKE_TABLES } from "../tables.ts";
-import type { LakeActionRow, LakeAdmin, LakeCounts } from "../types.ts";
+import type { ErasureSubject, LakeActionRow, LakeAdmin, LakeCounts } from "../types.ts";
 
 type Send = { send(command: unknown): Promise<unknown> };
 
@@ -51,6 +51,18 @@ const likeContains = (s: string) => sqlString(`%${s.replace(/[\\%_]/g, (c) => `\
 function uuidLiteral(id: string): string {
   assertTenantId(id); // same UUID check
   return sqlString(id);
+}
+
+const ACTOR_KEY_RE = /^[a-z]+:[A-Za-z0-9_-]{1,64}$/;
+
+/** WHERE clause matching one person's rows. Every value is validated before inlining. */
+function subjectFilter(s: ErasureSubject): string {
+  const keys = s.actorKeys.map((k) => {
+    if (!ACTOR_KEY_RE.test(k)) throw new LakeQueryError(`Invalid actor key`);
+    return sqlString(k);
+  });
+  const member = `member_id = ${uuidLiteral(s.memberId)}`;
+  return keys.length ? `(${member} OR actor_key IN (${keys.join(", ")}))` : member;
 }
 
 export function athenaLake(options: AthenaLakeOptions): LakeAdmin & {
@@ -173,18 +185,18 @@ export function athenaLake(options: AthenaLakeOptions): LakeAdmin & {
       return countsFrom(await query(tenantId, sql));
     },
 
-    async memberRowCounts(tenantId, memberId) {
-      const m = uuidLiteral(memberId);
+    async memberRowCounts(tenantId, subject) {
+      const where = subjectFilter(subject);
       const sql = LAKE_TABLES.map(
-        (t) => `SELECT '${t}' AS t, count(*) AS n FROM ${t} WHERE member_id = ${m}`,
+        (t) => `SELECT '${t}' AS t, count(*) AS n FROM ${t} WHERE ${where}`,
       ).join(" UNION ALL ");
       return countsFrom(await query(tenantId, sql));
     },
 
-    async deleteMemberRows(tenantId, memberId) {
-      const m = uuidLiteral(memberId);
+    async deleteMemberRows(tenantId, subject) {
+      const where = subjectFilter(subject);
       for (const t of LAKE_TABLES) {
-        await query(tenantId, `DELETE FROM ${t} WHERE member_id = ${m}`);
+        await query(tenantId, `DELETE FROM ${t} WHERE ${where}`);
         options.log?.("lake.member_rows_deleted", { tenantId, table: t });
       }
     },

@@ -41,9 +41,15 @@ importers:
       '@fastify/rate-limit':
         specifier: ^11.0.0
         version: 11.2.1
+      '@mm/audit':
+        specifier: workspace:*
+        version: link:../../packages/audit
       '@mm/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@mm/github':
+        specifier: workspace:*
+        version: link:../../packages/github
       '@mm/ingest':
         specifier: workspace:*
         version: link:../../packages/ingest
@@ -122,12 +128,21 @@ importers:
       '@mm/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@mm/github':
+        specifier: workspace:*
+        version: link:../../packages/github
       '@mm/ingest':
         specifier: workspace:*
         version: link:../../packages/ingest
       '@mm/lake':
         specifier: workspace:*
         version: link:../../packages/lake
+      '@mm/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+      '@mm/packs':
+        specifier: workspace:*
+        version: link:../../packages/packs
       '@mm/privacy':
         specifier: workspace:*
         version: link:../../packages/privacy
@@ -186,6 +201,34 @@ importers:
       tsx:
         specifier: ^4.20.0
         version: 4.23.15
+
+  packages/github:
+    dependencies:
+      '@mm/db':
+        specifier: workspace:*
+        version: link:../db
+      '@mm/ingest':
+        specifier: workspace:*
+        version: link:../ingest
+      '@mm/lake':
+        specifier: workspace:*
+        version: link:../lake
+      zod:
+        specifier: ^4.1.0
+        version: 4.6.7
+    devDependencies:
+      '@mm/llm':
+        specifier: workspace:*
+        version: link:../llm
+      '@mm/packs':
+        specifier: workspace:*
+        version: link:../packs
+      '@types/pg':
+        specifier: ^8.15.0
+        version: 8.23.1
+      pg:
+        specifier: ^8.16.0
+        version: 8.23.1
 
   packages/ingest:
     dependencies:
@@ -288,6 +331,31 @@ importers:
       zod:
         specifier: ^4.1.0
         version: 4.6.7
+
+  packages/packs:
+    dependencies:
+      '@mm/db':
+        specifier: workspace:*
+        version: link:../db
+      '@mm/lake':
+        specifier: workspace:*
+        version: link:../lake
+      '@mm/llm':
+        specifier: workspace:*
+        version: link:../llm
+      yaml:
+        specifier: ^2.8.0
+        version: 2.9.1
+      zod:
+        specifier: ^4.1.0
+        version: 4.6.7
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.15.0
+        version: 8.23.1
+      pg:
+        specifier: ^8.16.0
+        version: 8.23.1
 
   packages/privacy:
     dependencies:

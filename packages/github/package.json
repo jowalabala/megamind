@@ -1,0 +1,25 @@
+{
+  "name": "@mm/github",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@mm/db": "workspace:*",
+    "@mm/ingest": "workspace:*",
+    "@mm/lake": "workspace:*",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@mm/llm": "workspace:*",
+    "@mm/packs": "workspace:*",
+    "@types/pg": "^8.15.0",
+    "pg": "^8.16.0"
+  }
+}

@@ -2,7 +2,7 @@
 // captured); raw payloads and lake rows are removed by the worker afterwards.
 import { and, eq, inArray, lte, or, sql } from "drizzle-orm";
 import type { TenantTx } from "../client.ts";
-import { erasureRequests, members } from "../schema.ts";
+import { erasureRequests, members, tasks } from "../schema.ts";
 
 export type ErasureRequest = typeof erasureRequests.$inferSelect;
 
@@ -23,11 +23,13 @@ export async function requestMemberErasure(
     throw new ErasureNotAllowedError("Admins can't erase themselves; ask another admin.");
   }
   const [subject] = await tx
-    .select({ id: members.id, role: members.role })
+    .select({ id: members.id, githubUserId: members.githubUserId })
     .from(members)
     .where(eq(members.id, input.subjectMemberId))
     .for("update");
   if (!subject) throw new ErasureNotAllowedError("That member doesn't exist.");
+  // Connector data may be keyed only by their external identity.
+  const actorKeys = subject.githubUserId ? [`github:${subject.githubUserId}`] : [];
 
   const [request] = await tx
     .insert(erasureRequests)
@@ -35,8 +37,10 @@ export async function requestMemberErasure(
       tenantId,
       subjectMemberId: input.subjectMemberId,
       requestedByMemberId: input.requestedByMemberId,
+      subjectActorKeys: actorKeys,
     })
     .returning();
+  if (actorKeys.length) await tx.delete(tasks).where(inArray(tasks.actorKey, actorKeys));
   await tx.delete(members).where(eq(members.id, input.subjectMemberId));
   return request!;
 }

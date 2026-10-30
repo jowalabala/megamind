@@ -5,7 +5,7 @@ import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tenantNamespace } from "./naming.ts";
 import { LAKE_TABLES, type LakeTableName } from "./tables.ts";
-import type { LakeActionRow, LakeAdmin, LakeCounts, LakeSink } from "./types.ts";
+import type { ErasureSubject, LakeActionRow, LakeAdmin, LakeCounts, LakeSink } from "./types.ts";
 
 type Row = Record<string, unknown>;
 
@@ -68,7 +68,11 @@ function dedupe(rows: Row[]): Row[] {
   return rows.filter((r) => (seen.has(r.event_id) ? false : (seen.add(r.event_id), true)));
 }
 
-export type LocalLake = LakeSink & LakeAdmin;
+export type LocalLake = LakeSink &
+  LakeAdmin & { rows(tenantId: string, table: LakeTableName): Promise<Row[]> };
+
+const belongsTo = (s: ErasureSubject) => (r: Row) =>
+  r.member_id === s.memberId || s.actorKeys.includes(String(r.actor_key));
 
 /** In memory when `dir` is omitted. */
 export function localLake(options: { dir?: string } = {}): LocalLake {
@@ -91,17 +95,21 @@ export function localLake(options: { dir?: string } = {}): LocalLake {
       return { failedIds: [] };
     },
     tableCounts: (tenantId) => counts(tenantId, () => true),
-    memberRowCounts: (tenantId, memberId) => counts(tenantId, (r) => r.member_id === memberId),
-    async deleteMemberRows(tenantId, memberId) {
+    memberRowCounts: (tenantId, subject) => counts(tenantId, belongsTo(subject)),
+    async deleteMemberRows(tenantId, subject) {
       const ns = tenantNamespace(tenantId);
+      const mine = belongsTo(subject);
       for (const t of LAKE_TABLES) {
         const rows = await storage.read(ns, t);
         await storage.write(
           ns,
           t,
-          rows.filter((r) => r.member_id !== memberId),
+          rows.filter((r) => !mine(r)),
         );
       }
+    },
+    async rows(tenantId, table) {
+      return dedupe(await storage.read(tenantNamespace(tenantId), table));
     },
     async recentActions(tenantId, opts = {}) {
       const rows = dedupe(await storage.read(tenantNamespace(tenantId), "actions"))

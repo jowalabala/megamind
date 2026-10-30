@@ -18,3 +18,7 @@ export const ARTIFACT_KINDS = ["text", "diff", "email", "document", "link", "oth
 /** Where captured data came from. Mirrors the capture_source enum. */
 export const CAPTURE_SOURCES = ["mcp", "bridge", "github", "hubspot", "csv", "ui"] as const;
 export type CaptureSource = (typeof CAPTURE_SOURCES)[number];
+
+/** How a task's category was decided. */
+export const CATEGORY_SOURCES = ["rule", "hint", "llm", "fallback"] as const;
+export type CategorySource = (typeof CATEGORY_SOURCES)[number];

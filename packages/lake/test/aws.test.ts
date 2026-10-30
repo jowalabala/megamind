@@ -150,6 +150,7 @@ describe("athenaLake", () => {
       actions: 5,
       tasks: 2,
       metric_observations: 0,
+      task_categories: 0,
     });
     expect(sts.calls[0]!.input.RoleArn).toBe(
       `arn:aws:iam::123456789012:role/mastermind/dev/lake/mm-lake-dev-t-${HEX}`,
@@ -171,12 +172,23 @@ describe("athenaLake", () => {
 
   it("deletes a member's rows from every table, with the id validated", async () => {
     const { athena, lake } = setup();
-    await lake.deleteMemberRows(TENANT, MEMBER);
+    await lake.deleteMemberRows(TENANT, { memberId: MEMBER, actorKeys: [] });
+    await lake.deleteMemberRows(TENANT, { memberId: MEMBER, actorKeys: ["github:4242"] });
     const sqls = athena.calls
       .filter((c) => c.name === "StartQueryExecution")
       .map((c) => c.input.QueryString);
-    expect(sqls).toEqual(LAKE_TABLES.map((t) => `DELETE FROM ${t} WHERE member_id = '${MEMBER}'`));
-    await expect(lake.deleteMemberRows(TENANT, "x' OR '1'='1")).rejects.toThrow(/tenant id/);
+    expect(sqls).toEqual([
+      ...LAKE_TABLES.map((t) => `DELETE FROM ${t} WHERE member_id = '${MEMBER}'`),
+      ...LAKE_TABLES.map(
+        (t) => `DELETE FROM ${t} WHERE (member_id = '${MEMBER}' OR actor_key IN ('github:4242'))`,
+      ),
+    ]);
+    await expect(
+      lake.deleteMemberRows(TENANT, { memberId: "x' OR '1'='1", actorKeys: [] }),
+    ).rejects.toThrow(/tenant id/);
+    await expect(
+      lake.deleteMemberRows(TENANT, { memberId: MEMBER, actorKeys: ["github:1' OR '1'='1"] }),
+    ).rejects.toThrow(/actor key/);
   });
 
   it("escapes resource filters and reads paged results", async () => {

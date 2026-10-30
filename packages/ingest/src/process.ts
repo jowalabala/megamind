@@ -17,7 +17,7 @@ import {
 import type { QueueClient } from "@mm/db/queue";
 import { actionRecord, enqueueLakeRecords, metricRecord, taskRecord } from "@mm/lake";
 import { mergeCounts, type Redactor } from "@mm/privacy";
-import type { BronzeEnvelope, IngestJob } from "./accept.ts";
+import { idFromKey, type BronzeEnvelope, type IngestJob } from "./accept.ts";
 import type { BronzeStore } from "./bronze.ts";
 import type { RedactorFor } from "./redaction.ts";
 import {
@@ -362,7 +362,7 @@ export async function processActions(deps: ProcessDeps, job: IngestJob): Promise
 
 /** Wires the handlers to their queues. Used by the worker app. */
 export async function startIngestWorkers(
-  queue: Pick<QueueClient, "work">,
+  queue: Pick<QueueClient, "work" | "send">,
   deps: ProcessDeps,
 ): Promise<void> {
   const run =
@@ -370,6 +370,14 @@ export async function startIngestWorkers(
     async (job: { data: IngestJob }) => {
       const outcome = await fn(deps, job.data);
       deps.log?.(`${name}.${outcome}`, { id: job.data.id, tenantId: job.data.tenantId });
+      // A new task gets a category next.
+      if (fn === processTask && outcome === "stored") {
+        await queue.send(
+          "categorize.task",
+          { tenantId: job.data.tenantId, taskId: job.data.id },
+          { id: idFromKey([job.data.id, "categorize", "logged"]) },
+        );
+      }
     };
   await queue.work<IngestJob>("ingest.task", run(processTask, "ingest.task"));
   await queue.work<IngestJob>("ingest.outcome", run(processOutcome, "ingest.outcome"));

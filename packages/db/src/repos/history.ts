@@ -50,14 +50,16 @@ function likeContains(s: string): string {
 }
 
 type AuthorRow = {
-  member_id: string;
+  /** Null for connector tasks (e.g. a PR) whose author hasn't linked their account. */
+  member_id: string | null;
   display_name: string | null;
-  visibility_pref: "name" | "team" | "anonymous";
+  visibility_pref: "name" | "team" | "anonymous" | null;
   shares_team: boolean;
   team_name: string | null;
 };
 
 function who(row: AuthorRow, requester: string): string {
+  if (row.member_id === null) return "a contributor";
   if (row.member_id === requester) return "you";
   if (row.visibility_pref === "name" && row.shares_team && row.display_name) {
     return row.display_name;
@@ -83,7 +85,8 @@ const author = (requester: string) => sql`
     WHERE tm.member_id = m.id ORDER BY t.name LIMIT 1) AS team_name`;
 
 const visible = (requester: string) => sql`
-  (m.id = ${requester} OR (NOT m.capture_opt_out AND NOT coalesce(s.private, false)))`;
+  (m.id = ${requester}
+   OR (NOT coalesce(m.capture_opt_out, false) AND NOT coalesce(s.private, false)))`;
 
 export async function searchHistory(tx: TenantTx, q: HistoryQuery): Promise<HistoryItem[]> {
   const text = q.text?.trim() || null;
@@ -121,7 +124,7 @@ export async function searchHistory(tx: TenantTx, q: HistoryQuery): Promise<Hist
                        WHERE task_id = x.id ORDER BY metric_key, observed_at DESC) o) AS outcomes,
              ${author(me)}
         FROM tasks x
-        JOIN members m ON m.tenant_id = x.tenant_id AND m.id = x.member_id
+        LEFT JOIN members m ON m.tenant_id = x.tenant_id AND m.id = x.member_id
         LEFT JOIN agent_sessions s ON s.tenant_id = x.tenant_id AND s.id = x.agent_session_id
        WHERE ${visible(me)}
          ${text ? sql`AND x.search @@ ${tsq}` : sql``}

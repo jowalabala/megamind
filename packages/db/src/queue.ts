@@ -14,6 +14,14 @@ export const QUEUES = {
   "ingest.task": { retryLimit: 5, retryDelay: 5, retryBackoff: true, retryDelayMax: 300 },
   "ingest.outcome": { retryLimit: 8, retryDelay: 5, retryBackoff: true, retryDelayMax: 600 },
   "ingest.actions": { retryLimit: 5, retryDelay: 5, retryBackoff: true, retryDelayMax: 300 },
+  "categorize.task": { retryLimit: 5, retryDelay: 10, retryBackoff: true, retryDelayMax: 600 },
+  "github.sync_pr": { retryLimit: 6, retryDelay: 10, retryBackoff: true, retryDelayMax: 900 },
+  "github.backfill_repo": {
+    retryLimit: 6,
+    retryDelay: 30,
+    retryBackoff: true,
+    retryDelayMax: 1800,
+  },
 } as const satisfies Record<string, SendOptions>;
 
 export type QueueName = keyof typeof QUEUES;
@@ -57,7 +65,7 @@ export interface QueueClient {
   send<N extends QueueName>(
     name: N,
     data: object,
-    options?: { id?: string },
+    options?: { id?: string; startAfter?: Date },
   ): Promise<string | null>;
   work<T>(
     name: QueueName,
@@ -99,7 +107,7 @@ export async function createQueue(options: CreateQueueOptions): Promise<QueueCli
   return {
     boss,
     async send(name, data, sendOptions) {
-      return boss.send(name, data, { id: sendOptions?.id });
+      return boss.send(name, data, { id: sendOptions?.id, startAfter: sendOptions?.startAfter });
     },
     async work(name, handler, workOptions) {
       // One job per handler call keeps retries and failures per job.

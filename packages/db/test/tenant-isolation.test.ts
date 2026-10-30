@@ -13,7 +13,7 @@ const NON_TENANT_TABLES: Record<string, string> = {
   schema_migrations: "migration bookkeeping, owner-only",
 };
 /** Tenant tables where RLS is enabled but deliberately not FORCED (see the migration comments). */
-const RLS_NOT_FORCED = new Set(["tenants", "agent_keys"]);
+const RLS_NOT_FORCED = new Set(["tenants", "agent_keys", "connections"]);
 /** Tenant tables with a column mm_app must never read (checked below). */
 const SECRET_COLUMNS: Record<string, string> = { agent_keys: "key_hash" };
 const tenantColumn = (table: string) => (table === "tenants" ? "id" : "tenant_id");
@@ -89,6 +89,22 @@ async function seedTenant(slug: string) {
     await tx.execute(sql`
       INSERT INTO action_events (tenant_id, id, session_id, member_id, kind, summary_redacted, occurred_at)
       VALUES (${t.tenantId}, gen_random_uuid(), ${session!.id}, ${member.id}, 'edit', 'seed', now())`);
+    const [conn] = await tx
+      .execute<{ id: string }>(
+        sql`
+      INSERT INTO connections (tenant_id, provider, external_id)
+      VALUES (${t.tenantId}, 'github', ${`inst-${slug}`}) RETURNING id`,
+      )
+      .then((r) => r.rows);
+    const prTask = crypto.randomUUID();
+    await tx.execute(sql`
+      INSERT INTO tasks (id, tenant_id, actor_key, connection_id, source, title_redacted)
+      VALUES (${prTask}, ${t.tenantId}, 'github:42', ${conn!.id}, 'github', 'Seed PR')`);
+    await tx.execute(sql`
+      INSERT INTO github_pull_requests (tenant_id, task_id, connection_id, repo_id, repo, number,
+        author_key, state, base_ref, head_ref_redacted, opened_at, gh_updated_at)
+      VALUES (${t.tenantId}, ${prTask}, ${conn!.id}, 1, ${`${slug}/api`}, 1, 'github:42', 'open',
+        'main', 'feature', now(), now())`);
     await tx.execute(sql`
       INSERT INTO lake_outbox (tenant_id, member_id, lake_table, event_id, row)
       VALUES (${t.tenantId}, ${member.id}, 'tasks', ${taskId}, '{}')`);

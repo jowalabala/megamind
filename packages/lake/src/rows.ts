@@ -4,7 +4,8 @@ import type { CaptureSource, LakeTableName } from "@mm/db";
 export interface LakeRecord {
   table: LakeTableName;
   eventId: string;
-  memberId: string;
+  /** Null for connector rows not yet linked to a member. */
+  memberId: string | null;
   row: Record<string, unknown>;
 }
 
@@ -13,11 +14,21 @@ const iso = (d: Date | string | null | undefined) =>
 
 interface Base {
   tenantId: string;
-  memberId: string;
+  memberId: string | null;
+  actorKey?: string | null;
   agentId: string | null;
   source: CaptureSource;
   ingestedAt: Date;
 }
+
+const base = (b: Base) => ({
+  tenant_id: b.tenantId,
+  member_id: b.memberId,
+  actor_key: b.actorKey ?? null,
+  agent_id: b.agentId,
+  source: b.source,
+  ingested_at: iso(b.ingestedAt),
+});
 
 export function actionRecord(
   e: Base & {
@@ -37,10 +48,7 @@ export function actionRecord(
     memberId: e.memberId,
     row: {
       event_id: e.id,
-      tenant_id: e.tenantId,
-      member_id: e.memberId,
-      agent_id: e.agentId,
-      source: e.source,
+      ...base(e),
       session_id: e.sessionId,
       task_id: e.taskId,
       private: e.private,
@@ -48,7 +56,6 @@ export function actionRecord(
       summary: e.summary,
       resources: JSON.stringify(e.resources),
       event_time: iso(e.occurredAt),
-      ingested_at: iso(e.ingestedAt),
     },
   };
 }
@@ -74,10 +81,7 @@ export function taskRecord(
     memberId: t.memberId,
     row: {
       event_id: t.id,
-      tenant_id: t.tenantId,
-      member_id: t.memberId,
-      agent_id: t.agentId,
-      source: t.source,
+      ...base(t),
       session_id: t.sessionId,
       private: t.private,
       title: t.title,
@@ -88,7 +92,6 @@ export function taskRecord(
       started_at: iso(t.startedAt),
       completed_at: iso(t.completedAt),
       event_time: iso(t.createdAt),
-      ingested_at: iso(t.ingestedAt),
     },
   };
 }
@@ -110,17 +113,42 @@ export function metricRecord(
     memberId: m.memberId,
     row: {
       event_id: m.id,
-      tenant_id: m.tenantId,
-      member_id: m.memberId,
-      agent_id: m.agentId,
-      source: m.source,
+      ...base(m),
       task_id: m.taskId,
       metric: m.metric,
       value: m.value,
       n: m.n,
       note: m.note,
       event_time: iso(m.observedAt),
-      ingested_at: iso(m.ingestedAt),
+    },
+  };
+}
+
+export function categoryRecord(
+  c: Base & {
+    /** Unique per categorization, so a re-categorized task gets a new row. */
+    id: string;
+    taskId: string;
+    pack: string;
+    category: string;
+    method: string;
+    confidence: number;
+    categorizedAt: Date;
+  },
+): LakeRecord {
+  return {
+    table: "task_categories",
+    eventId: c.id,
+    memberId: c.memberId,
+    row: {
+      event_id: c.id,
+      ...base(c),
+      task_id: c.taskId,
+      pack: c.pack,
+      category: c.category,
+      method: c.method,
+      confidence: c.confidence,
+      event_time: iso(c.categorizedAt),
     },
   };
 }

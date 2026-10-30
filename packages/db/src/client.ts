@@ -68,6 +68,11 @@ export interface MasterMindDb {
      * `lakeReady` is true once the tenant's lake namespace has been provisioned.
      */
     listTenantsForJobs(): Promise<{ tenantId: string; lakeReady: boolean }[]>;
+    /** Resolves an integration's external id (e.g. a GitHub installation) to its tenant. */
+    resolveConnection(
+      provider: "github",
+      externalId: string,
+    ): Promise<{ tenantId: string; connectionId: string; status: string } | null>;
   };
   /** Readiness check. Also reports any tenant context on a pooled connection, which must always be null. */
   health(): Promise<{ ok: true; leakedTenantContext: string | null }>;
@@ -154,6 +159,16 @@ export function createDb(options: CreateDbOptions): MasterMindDb {
           sql`SELECT tenant_id, lake_ready FROM mm_list_tenants_for_jobs()`,
         );
         return res.rows.map((r) => ({ tenantId: r.tenant_id, lakeReady: r.lake_ready }));
+      },
+
+      async resolveConnection(provider, externalId) {
+        const res = await db.execute<{ tenant_id: string; connection_id: string; status: string }>(
+          sql`SELECT * FROM mm_resolve_connection(${provider}, ${externalId})`,
+        );
+        const r = res.rows[0];
+        return r
+          ? { tenantId: r.tenant_id, connectionId: r.connection_id, status: r.status }
+          : null;
       },
     },
 

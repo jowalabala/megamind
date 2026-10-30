@@ -246,25 +246,32 @@ describe("processErasures", () => {
     const opts = { db, lake, deleteRaw, now: () => now, requireProvisioned: true };
     expect(await processErasures(opts)).toBe(1);
     expect(raw.has(`${A}/${leaving.memberId}`)).toBe(false);
-    expect(await lake.memberRowCounts(A, leaving.memberId)).toEqual({
+    expect(await lake.memberRowCounts(A, { memberId: leaving.memberId, actorKeys: [] })).toEqual({
       actions: 0,
       tasks: 0,
       metric_observations: 0,
+      task_categories: 0,
     });
     // The buffered row lands after the first pass...
     await lake.put(
       A,
       buffered.map((r) => ({ id: r.id, table: r.lakeTable, eventId: r.eventId, row: r.row })),
     );
-    expect((await lake.memberRowCounts(A, leaving.memberId)).actions).toBe(1);
+    expect(
+      (await lake.memberRowCounts(A, { memberId: leaving.memberId, actorKeys: [] })).actions,
+    ).toBe(1);
 
     // ...and nothing happens until the second pass is due.
     expect(await processErasures(opts)).toBe(0);
     now = new Date(now.getTime() + 16 * 60_000);
     expect(await processErasures(opts)).toBe(1);
-    expect((await lake.memberRowCounts(A, leaving.memberId)).actions).toBe(0);
+    expect(
+      (await lake.memberRowCounts(A, { memberId: leaving.memberId, actorKeys: [] })).actions,
+    ).toBe(0);
     // Other members are untouched.
-    expect((await lake.memberRowCounts(A, staying.memberId)).actions).toBe(2);
+    expect(
+      (await lake.memberRowCounts(A, { memberId: staying.memberId, actorKeys: [] })).actions,
+    ).toBe(2);
 
     const [done] = await db.withTenant(A, (tx) =>
       tx.select().from(erasureRequests).where(eq(erasureRequests.id, req.id)),
@@ -319,7 +326,9 @@ describe("processErasures", () => {
     const victim = await member(B, "local-victim");
     await capture(B, victim, 2);
     await publishOutbox({ db, sink: lake });
-    expect((await lake.memberRowCounts(B, victim.memberId)).actions).toBe(2);
+    expect(
+      (await lake.memberRowCounts(B, { memberId: victim.memberId, actorKeys: [] })).actions,
+    ).toBe(2);
     await db.withTenant(B, async (tx) => {
       const admin = await tx.execute<{ id: string }>(
         sql`SELECT id FROM members WHERE role = 'admin'`,
@@ -330,7 +339,9 @@ describe("processErasures", () => {
       });
     });
     await processErasures({ db, lake, deleteRaw: async () => {}, requireProvisioned: false });
-    expect((await lake.memberRowCounts(B, victim.memberId)).actions).toBe(0);
+    expect(
+      (await lake.memberRowCounts(B, { memberId: victim.memberId, actorKeys: [] })).actions,
+    ).toBe(0);
   });
 
   it("skips the lake for tenants without one", async () => {

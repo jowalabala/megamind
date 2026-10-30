@@ -1,7 +1,10 @@
 // End to end: an MCP client (as an agent would) -> API -> bronze + queue -> worker -> Postgres.
+import { createHmac } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import {
   agentRepo,
+  connectionRepo,
+  connections,
   createDb,
   eq,
   memberRepo,
@@ -24,6 +27,7 @@ let queue: QueueClient;
 let app: Awaited<ReturnType<typeof buildApp>>;
 let baseUrl: string;
 const bronze = memoryBronze();
+const WEBHOOK_SECRET = "whsec_" + "test".repeat(8);
 const keys: Record<string, string> = {};
 const tenants: Record<string, string> = {};
 
@@ -106,7 +110,7 @@ beforeAll(async () => {
     bronze,
     redactorFor: tenantRedactors({ db, pseudonymSecret: "s".repeat(40) }),
   });
-  app = await buildApp({ db, queue, bronze });
+  app = await buildApp({ db, queue, bronze, githubWebhookSecret: WEBHOOK_SECRET });
   await app.listen({ port: 0, host: "127.0.0.1" });
   baseUrl = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
 });
@@ -386,5 +390,100 @@ describe("search_history (week 3)", () => {
       scopes: ["capture:write", "history:read"],
       capture_opt_out: false,
     });
+  });
+});
+
+describe("GitHub webhooks (week 4)", () => {
+  const deliver = (event: string, payload: unknown, secret = WEBHOOK_SECRET) => {
+    const body = JSON.stringify(payload);
+    return fetch(`${baseUrl}/webhooks/github`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-github-event": event,
+        "x-github-delivery": crypto.randomUUID(),
+        "x-hub-signature-256": `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`,
+      },
+      body,
+    });
+  };
+  let connectionId: string;
+
+  beforeAll(async () => {
+    const tenantId = tenants.acme!;
+    connectionId = await db.withTenant(tenantId, async (tx) => {
+      const [admin] = await tx
+        .execute<{ id: string }>(sql`SELECT id FROM members WHERE role = 'admin'`)
+        .then((r) => r.rows);
+      return (
+        await connectionRepo.upsertGithubInstallation(tx, tenantId, {
+          installationId: "777",
+          accountLogin: "acme",
+          createdByMemberId: admin!.id,
+        })
+      ).connection.id;
+    });
+  });
+
+  it("rejects deliveries with a bad or missing signature", async () => {
+    expect((await deliver("ping", { zen: "x" }, "wrong-secret")).status).toBe(401);
+    const unsigned = await fetch(`${baseUrl}/webhooks/github`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-github-event": "ping" },
+      body: "{}",
+    });
+    expect(unsigned.status).toBe(401);
+    expect((await deliver("ping", { zen: "x" })).status).toBe(200);
+  });
+
+  it("ignores installations that aren't connected to a workspace", async () => {
+    const res = await deliver("pull_request", {
+      action: "opened",
+      installation: { id: 123456 },
+      repository: { id: 1, full_name: "evil/repo" },
+      pull_request: { number: 1 },
+    });
+    expect(res.status).toBe(202);
+    expect(await res.json()).toEqual({ ignored: "unknown_installation" });
+  });
+
+  it("turns a PR event into a sync job holding pointers only", async () => {
+    const res = await deliver("pull_request", {
+      action: "closed",
+      installation: { id: 777 },
+      repository: { id: 1001, full_name: "acme/api" },
+      pull_request: { number: 12, title: "SECRET TITLE", body: "secret body" },
+    });
+    expect(res.status).toBe(202);
+    const { rows } = await adminQuery(
+      env.adminUrl,
+      "SELECT data FROM pgboss.job WHERE name = 'github.sync_pr'",
+    );
+    expect(rows.map((r) => r.data)).toEqual([
+      {
+        tenantId: tenants.acme,
+        connectionId,
+        installationId: "777",
+        repoId: 1001,
+        fullName: "acme/api",
+        number: 12,
+      },
+    ]);
+    expect(JSON.stringify(rows)).not.toContain("SECRET");
+  });
+
+  it("an uninstall marks the connection removed, and later events are ignored", async () => {
+    await deliver("installation", { action: "deleted", installation: { id: 777 } });
+    const [c] = await db.withTenant(tenants.acme!, (tx) =>
+      tx.select().from(connections).where(eq(connections.id, connectionId)),
+    );
+    expect(c!.status).toBe("removed");
+    const res = await deliver("pull_request", {
+      action: "opened",
+      installation: { id: 777 },
+      repository: { id: 1001, full_name: "acme/api" },
+      pull_request: { number: 13 },
+    });
+    expect(await res.json()).toEqual({ ignored: "installation_removed" });
   });
 });

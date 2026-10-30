@@ -10,6 +10,9 @@ import {
 } from "@mm/ingest";
 import { localLake, processErasures, publishOutbox, type LakeAdmin, type LakeSink } from "@mm/lake";
 import { athenaLake, firehoseSink } from "@mm/lake/aws";
+import { createGithubApp, startGithubWorkers, startPendingBackfills } from "@mm/github";
+import { bedrockTransport, createLlm, dbCallLogger, modelConfigFromEnv } from "@mm/llm";
+import { builtinPacks, categorizeTask, type CategorizeJob } from "@mm/packs";
 import { comprehendDetector } from "@mm/privacy/comprehend";
 
 const connectionString = databaseUrlFromEnv();
@@ -48,6 +51,51 @@ const redactorFor = tenantRedactors({
 });
 
 await startIngestWorkers(queue, { db, bronze, redactorFor, log });
+
+// Categorization: pack rules first, Claude (Haiku on Bedrock) only when they don't decide.
+const llm =
+  process.env.MM_LLM_CATEGORIZE === "off"
+    ? null
+    : createLlm({
+        transport: bedrockTransport({ awsRegion: process.env.AWS_REGION }),
+        models: modelConfigFromEnv(),
+        log: dbCallLogger(db),
+      });
+const packs = builtinPacks();
+await queue.work<CategorizeJob>("categorize.task", async (job) => {
+  const d = await categorizeTask({ db, packs, llm }, job.data);
+  log("categorize.done", {
+    tenantId: job.data.tenantId,
+    taskId: job.data.taskId,
+    category: d?.category ?? null,
+    method: d?.method ?? null,
+  });
+});
+
+// GitHub connector, when the App is configured.
+const githubAppId = process.env.MM_GITHUB_APP_ID;
+const githubKey = process.env.MM_GITHUB_PRIVATE_KEY?.replace(/\\n/g, "\n");
+const githubDeps =
+  githubAppId && githubKey
+    ? {
+        db,
+        redactorFor,
+        log,
+        app: createGithubApp({
+          appId: githubAppId,
+          privateKey: githubKey,
+          apiUrl: process.env.MM_GITHUB_API_URL,
+        }),
+        enqueue: async (
+          name: "github.backfill_repo" | "github.sync_pr" | "categorize.task",
+          data: object,
+          options?: { id?: string; startAfter?: Date },
+        ) => {
+          await queue.send(name, data, options);
+        },
+      }
+    : null;
+if (githubDeps) await startGithubWorkers(queue, githubDeps);
 
 // The lake: Firehose + Athena in AWS, newline-delimited JSON files in development.
 const stream = process.env.MM_LAKE_FIREHOSE_STREAM;
@@ -107,6 +155,9 @@ const timers = [
       log,
     }),
   ),
+  ...(githubDeps
+    ? [every("github.backfills", 30_000, () => startPendingBackfills(githubDeps))]
+    : []),
   every("hot.prune", 60 * 60_000, async () => {
     for (const t of await db.system.listTenantsForJobs()) {
       const n = await db.withTenant(t.tenantId, (tx) => historyRepo.pruneHotActions(tx, 90));
@@ -118,6 +169,8 @@ const timers = [
 log("worker.started", {
   comprehend: process.env.MM_PII_COMPREHEND === "on",
   lake: stream ? "firehose" : "local",
+  github: Boolean(githubDeps),
+  llm: Boolean(llm),
 });
 
 async function shutdown() {

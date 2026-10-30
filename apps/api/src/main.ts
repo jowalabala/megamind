@@ -22,6 +22,7 @@ const app = await buildApp({
   db,
   queue,
   bronze,
+  githubWebhookSecret: process.env.MM_GITHUB_WEBHOOK_SECRET || undefined,
   logger: { level: process.env.LOG_LEVEL ?? "info" },
 });
 

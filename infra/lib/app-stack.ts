@@ -48,6 +48,22 @@ export class AppStack extends Stack {
       description: "WorkOS credentials for the web app (set values manually)",
     });
 
+    // GitHub App credentials, split so each service holds only its part (values set manually):
+    // the web app runs the OAuth flows, the API checks webhook signatures, the worker calls GitHub.
+    const githubOauth = new secretsmanager.Secret(this, "GithubOauthSecret", {
+      secretName: `mastermind/${cfg.stage}/github-oauth`,
+      description:
+        "GitHub App slug, client id and client secret (keys APP_SLUG, CLIENT_ID, CLIENT_SECRET)",
+    });
+    const githubWebhook = new secretsmanager.Secret(this, "GithubWebhookSecret", {
+      secretName: `mastermind/${cfg.stage}/github-webhook`,
+      description: "GitHub App webhook secret (key WEBHOOK_SECRET)",
+    });
+    const githubAppKey = new secretsmanager.Secret(this, "GithubAppKeySecret", {
+      secretName: `mastermind/${cfg.stage}/github-app-key`,
+      description: "GitHub App id and private key (keys APP_ID, PRIVATE_KEY)",
+    });
+
     const web = new ecsPatterns.ApplicationLoadBalancedFargateService(this, "Web", {
       cluster,
       desiredCount: cfg.webDesiredCount,
@@ -85,6 +101,9 @@ export class AppStack extends Stack {
             workosSecret,
             "WORKOS_COOKIE_PASSWORD",
           ),
+          MM_GITHUB_APP_SLUG: ecs.Secret.fromSecretsManager(githubOauth, "APP_SLUG"),
+          MM_GITHUB_CLIENT_ID: ecs.Secret.fromSecretsManager(githubOauth, "CLIENT_ID"),
+          MM_GITHUB_CLIENT_SECRET: ecs.Secret.fromSecretsManager(githubOauth, "CLIENT_SECRET"),
         },
       },
     });
@@ -129,7 +148,10 @@ export class AppStack extends Stack {
       command: ["node", "--enable-source-maps", "api/main.js"],
       portMappings: [{ containerPort: 4000 }],
       environment: sharedEnv,
-      secrets: dbSecrets,
+      secrets: {
+        ...dbSecrets,
+        MM_GITHUB_WEBHOOK_SECRET: ecs.Secret.fromSecretsManager(githubWebhook, "WEBHOOK_SECRET"),
+      },
       logging: ecs.LogDrivers.awsLogs({
         streamPrefix: "api",
         logRetention: logs.RetentionDays.ONE_YEAR,
@@ -146,10 +168,10 @@ export class AppStack extends Stack {
       circuitBreaker: { rollback: true },
       minHealthyPercent: 100,
     });
-    // Same load balancer as the web app: /mcp and /v1/* go to the API.
+    // Same load balancer as the web app: /mcp, /v1/* and /webhooks/* go to the API.
     web.listener.addTargets("ApiTargets", {
       priority: 10,
-      conditions: [elbv2.ListenerCondition.pathPatterns(["/mcp", "/v1/*"])],
+      conditions: [elbv2.ListenerCondition.pathPatterns(["/mcp", "/v1/*", "/webhooks/*"])],
       port: 4000,
       protocol: elbv2.ApplicationProtocol.HTTP,
       targets: [api],
@@ -175,6 +197,8 @@ export class AppStack extends Stack {
       secrets: {
         ...dbSecrets,
         MM_PSEUDONYM_SECRET: ecs.Secret.fromSecretsManager(pseudonymSecret),
+        MM_GITHUB_APP_ID: ecs.Secret.fromSecretsManager(githubAppKey, "APP_ID"),
+        MM_GITHUB_PRIVATE_KEY: ecs.Secret.fromSecretsManager(githubAppKey, "PRIVATE_KEY"),
       },
       logging: ecs.LogDrivers.awsLogs({
         streamPrefix: "worker",

@@ -12,6 +12,12 @@ export {
 export { databaseSslFromEnv, databaseUrlFromEnv } from "./env.ts";
 export * from "./constants.ts";
 export * as agentRepo from "./repos/agents.ts";
+export * as connectionRepo from "./repos/connections.ts";
+export {
+  AccountAlreadyLinkedError,
+  ConnectionConflictError,
+  type Connection,
+} from "./repos/connections.ts";
 export * as erasureRepo from "./repos/erasure.ts";
 export { ErasureNotAllowedError } from "./repos/erasure.ts";
 export * as historyRepo from "./repos/history.ts";

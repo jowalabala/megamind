@@ -161,10 +161,32 @@ describe("app stack (api, worker, web)", () => {
     expect(api.some((a) => /^(sts:AssumeRole|firehose:)/.test(a))).toBe(false);
   });
 
-  it("routes /mcp and /v1/* to the API on the shared load balancer", () => {
+  it("routes /mcp, /v1/* and /webhooks/* to the API on the shared load balancer", () => {
     t.hasResourceProperties("AWS::ElasticLoadBalancingV2::ListenerRule", {
-      Conditions: [{ Field: "path-pattern", PathPatternConfig: { Values: ["/mcp", "/v1/*"] } }],
+      Conditions: [
+        { Field: "path-pattern", PathPatternConfig: { Values: ["/mcp", "/v1/*", "/webhooks/*"] } },
+      ],
     });
+  });
+
+  it("each service gets only its part of the GitHub App credentials", () => {
+    const defs = Object.values(t.findResources("AWS::ECS::TaskDefinition")) as {
+      Properties: { ContainerDefinitions: { Name: string; Secrets?: { Name: string }[] }[] };
+    }[];
+    const secretsOf = (name: string) =>
+      defs
+        .flatMap((d) => d.Properties.ContainerDefinitions)
+        .find((c) => c.Name === name)!
+        .Secrets!.map((x) => x.Name)
+        .filter((n) => n.startsWith("MM_GITHUB"))
+        .sort();
+    expect(secretsOf("web")).toEqual([
+      "MM_GITHUB_APP_SLUG",
+      "MM_GITHUB_CLIENT_ID",
+      "MM_GITHUB_CLIENT_SECRET",
+    ]);
+    expect(secretsOf("api")).toEqual(["MM_GITHUB_WEBHOOK_SECRET"]);
+    expect(secretsOf("worker")).toEqual(["MM_GITHUB_APP_ID", "MM_GITHUB_PRIVATE_KEY"]);
   });
 
   it("web, api and worker each get their own Postgres ingress rule, nothing else", () => {

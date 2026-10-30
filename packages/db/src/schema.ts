@@ -12,6 +12,7 @@ import {
   pgEnum,
   pgTable,
   primaryKey,
+  real,
   text,
   timestamp,
   uuid,
@@ -20,6 +21,7 @@ import {
   AGENT_KINDS,
   ARTIFACT_KINDS,
   CAPTURE_SOURCES,
+  CATEGORY_SOURCES,
   DEFAULT_AGENT_SCOPES,
   type AgentScope,
 } from "./constants.ts";
@@ -61,6 +63,7 @@ export const members = pgTable("members", {
   creditOptIn: boolean("credit_opt_in").notNull().default(false),
   visibilityPref: visibilityPref("visibility_pref").notNull().default("team"),
   createdAt: createdAt(),
+  githubUserId: bigint("github_user_id", { mode: "number" }),
 });
 
 export const teamMembers = pgTable(
@@ -180,7 +183,8 @@ export const agentSessions = pgTable("agent_sessions", {
 export const tasks = pgTable("tasks", {
   id: uuid("id").primaryKey(),
   tenantId: uuid("tenant_id").notNull(),
-  memberId: uuid("member_id").notNull(),
+  /** Null for connector tasks whose author hasn't linked an account; actorKey is set then. */
+  memberId: uuid("member_id"),
   agentIdentityId: uuid("agent_identity_id"),
   agentSessionId: uuid("agent_session_id"),
   source: captureSource("source").notNull(),
@@ -198,6 +202,12 @@ export const tasks = pgTable("tasks", {
   search: tsvector("search").generatedAlwaysAs(
     sql`to_tsvector('simple', mm_search_text(title_redacted || ' ' || summary_redacted))`,
   ),
+  actorKey: text("actor_key"),
+  connectionId: uuid("connection_id"),
+  pack: text("pack"),
+  category: text("category"),
+  categorySource: text("category_source", { enum: CATEGORY_SOURCES }),
+  categoryConfidence: real("category_confidence"),
 });
 
 export const artifacts = pgTable("artifacts", {
@@ -258,7 +268,7 @@ export const actionEvents = pgTable(
 
 // Lake and erasure (migration 0006) ----------------------------------------------------
 
-export const LAKE_TABLES = ["actions", "tasks", "metric_observations"] as const;
+export const LAKE_TABLES = ["actions", "tasks", "metric_observations", "task_categories"] as const;
 export type LakeTableName = (typeof LAKE_TABLES)[number];
 
 export const lakeOutbox = pgTable("lake_outbox", {
@@ -288,7 +298,79 @@ export const erasureRequests = pgTable("erasure_requests", {
   lastError: text("last_error"),
   createdAt: createdAt(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  subjectActorKeys: text("subject_actor_keys").array().notNull().default([]),
 });
+
+// GitHub (migration 0007) ----------------------------------------------------------------
+
+export const connections = pgTable("connections", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id").notNull(),
+  provider: text("provider", { enum: ["github"] }).notNull(),
+  externalId: text("external_id").notNull(),
+  accountLogin: text("account_login"),
+  status: text("status", { enum: ["active", "suspended", "removed"] })
+    .notNull()
+    .default("active"),
+  createdByMemberId: uuid("created_by_member_id"),
+  backfillStatus: text("backfill_status", { enum: ["pending", "running", "done", "failed"] })
+    .notNull()
+    .default("pending"),
+  backfillState: jsonb("backfill_state")
+    .$type<Record<string, { name: string; done: boolean; prs: number }>>()
+    .notNull()
+    .default({}),
+  backfillError: text("backfill_error"),
+  createdAt: createdAt(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export interface PrFile {
+  path: string;
+  additions: number;
+  deletions: number;
+}
+export interface PrReview {
+  state: string;
+  author_key: string;
+  submitted_at: string | null;
+}
+
+export const githubPullRequests = pgTable(
+  "github_pull_requests",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    taskId: uuid("task_id").notNull(),
+    connectionId: uuid("connection_id"),
+    repoId: bigint("repo_id", { mode: "number" }).notNull(),
+    repo: text("repo").notNull(),
+    number: integer("number").notNull(),
+    authorKey: text("author_key").notNull(),
+    authorIsBot: boolean("author_is_bot").notNull().default(false),
+    state: text("state", { enum: ["open", "closed", "merged"] }).notNull(),
+    draft: boolean("draft").notNull().default(false),
+    baseRef: text("base_ref").notNull(),
+    headRefRedacted: text("head_ref_redacted").notNull(),
+    headSha: text("head_sha"),
+    mergeCommitSha: text("merge_commit_sha"),
+    additions: integer("additions").notNull().default(0),
+    deletions: integer("deletions").notNull().default(0),
+    changedFiles: integer("changed_files").notNull().default(0),
+    commits: integer("commits").notNull().default(0),
+    labels: text("labels").array().notNull().default([]),
+    files: jsonb("files").$type<PrFile[]>().notNull().default([]),
+    reviews: jsonb("reviews").$type<PrReview[]>().notNull().default([]),
+    closingIssues: integer("closing_issues").array().notNull().default([]),
+    ciState: text("ci_state"),
+    openedAt: timestamp("opened_at", { withTimezone: true }).notNull(),
+    mergedAt: timestamp("merged_at", { withTimezone: true }),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    ghUpdatedAt: timestamp("gh_updated_at", { withTimezone: true }).notNull(),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+    lakeEmittedAt: timestamp("lake_emitted_at", { withTimezone: true }),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.taskId] })],
+);
 
 /** Every Drizzle table, used by the drift test. */
 export const allTables = {
@@ -309,4 +391,6 @@ export const allTables = {
   actionEvents,
   lakeOutbox,
   erasureRequests,
+  connections,
+  githubPullRequests,
 };

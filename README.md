@@ -17,6 +17,8 @@ produce results, and turns them into reviewed, versioned skills. See [docs/PLAN.
 | `packages/ingest`  | Capture: input schemas, bronze storage, accept and process steps       |
 | `packages/mcp`     | MCP tool definitions shared by the remote server and the bridge        |
 | `packages/lake`    | Iceberg lake: outbox publisher, Athena queries, erasure, provisioning  |
+| `packages/github`  | GitHub App connector: auth, backfill, webhooks, PR sync and features   |
+| `packages/packs`   | Domain packs (YAML): categories, rules, features, metrics; categorizer |
 | `packages/llm`     | Claude on Bedrock: prompt registry, structured output, call log        |
 | `infra`            | AWS CDK: network, data (RDS, S3, KMS), lake (S3 Tables, Firehose), app |
 | `docs/adr`         | Architecture decisions                                                 |
@@ -120,6 +122,29 @@ reached the lake (add your own role to `MM_LAKE_TRUSTED_ROLE_ARNS` first):
 ```bash
 pnpm --filter @mm/lake check <tenant-id> src/billing/
 ```
+
+### GitHub App
+
+Register a GitHub App (Settings → Developer settings → GitHub Apps) with:
+
+- **Permissions (all read-only):** Pull requests, Contents, Checks, Issues, Metadata.
+- **Events:** Pull request, Pull request review, Check suite, Installation repositories.
+- **Webhook URL:** `<api url>/webhooks/github`, with a random webhook secret.
+- **Callback URL and Setup URL:** `<web url>/integrations/github/callback`, and tick
+  **Request user authorization (OAuth) during installation**. The app uses it to confirm
+  that the person installing can really access the installation.
+
+Put the slug, client id and client secret in the web app's env, the webhook secret in the API's,
+and the App id and private key in the worker's (`.env.example` lists the names; in AWS they are
+the `mastermind/<stage>/github-*` secrets). Then an admin uses Settings → Integrations → Connect
+GitHub. The worker imports 12 months of pull requests, then keeps them current from webhooks.
+Members can link their GitHub account on the same page so their PRs are credited to them.
+
+### Categories
+
+Every task gets a category from its domain pack (`packages/packs`): the pack's rules first
+(e.g. a `fix:` title or a `bug` label), then the agent's own hint, then Claude Haiku on the
+redacted text. Set `MM_LLM_CATEGORIZE=off` locally to skip the model.
 
 ### Removing a member
 

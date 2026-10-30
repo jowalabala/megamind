@@ -2,12 +2,16 @@
 // Every route except /healthz needs an agent key; the tenant always comes from that key.
 import { createHash } from "node:crypto";
 import rateLimit from "@fastify/rate-limit";
-import { historyRepo, type AuthenticatedAgent, type MasterMindDb } from "@mm/db";
+import { appendAuditEvent } from "@mm/audit";
+import { connectionRepo, historyRepo, type AuthenticatedAgent, type MasterMindDb } from "@mm/db";
+import type { QueueName } from "@mm/db/queue";
+import { backfillAddedRepos, installationOf, planWebhook, verifySignature } from "@mm/github";
 import {
   acceptActions,
   acceptOutcome,
   acceptTask,
   actionBatchInput,
+  idFromKey,
   IngestForbiddenError,
   logTaskInput,
   reportOutcomeInput,
@@ -33,6 +37,8 @@ import { z } from "zod";
 
 export interface AppDeps extends AcceptDeps {
   db: MasterMindDb;
+  /** GitHub App webhook secret. Without it the webhook endpoint is not mounted. */
+  githubWebhookSecret?: string;
   logger?: boolean | object;
   /** Requests per minute per agent key (or per IP without one). */
   rateLimitPerMinute?: number;
@@ -191,6 +197,93 @@ export async function buildApp(deps: AppDeps) {
     scopes: req.agent!.scopes,
     capture_opt_out: req.agent!.captureOptOut,
   }));
+
+  if (deps.githubWebhookSecret) {
+    const secret = deps.githubWebhookSecret;
+    // Its own scope: the signature is over the exact bytes, so this route keeps the raw body.
+    await app.register(async (scope) => {
+      scope.addContentTypeParser("application/json", { parseAs: "buffer" }, (_req, body, done) =>
+        done(null, body),
+      );
+      scope.post(
+        "/webhooks/github",
+        // GitHub sends from a few addresses; the per-IP agent limit would throttle it.
+        { config: { rateLimit: { max: 6000, timeWindow: "1 minute" } } },
+        async (req, reply) => {
+          const body = req.body as Buffer;
+          const sig = req.headers["x-hub-signature-256"];
+          if (
+            !Buffer.isBuffer(body) ||
+            !verifySignature(secret, body, typeof sig === "string" ? sig : undefined)
+          ) {
+            return reply.code(401).send({ error: "bad_signature" });
+          }
+          const event = String(req.headers["x-github-event"] ?? "");
+          const delivery = String(req.headers["x-github-delivery"] ?? "");
+          let payload: unknown;
+          try {
+            payload = JSON.parse(body.toString("utf8"));
+          } catch {
+            return reply.code(400).send({ error: "invalid_json" });
+          }
+          if (event === "ping") return reply.code(200).send({ ok: true });
+
+          const installationId = installationOf(payload);
+          const conn = installationId
+            ? await deps.db.system.resolveConnection("github", installationId)
+            : null;
+          // Installations that never finished setup here (or were removed) are ignored.
+          if (!conn || !installationId)
+            return reply.code(202).send({ ignored: "unknown_installation" });
+
+          const plan = planWebhook(event, payload);
+          if (plan.kind === "ignore") return reply.code(202).send({ ignored: plan.reason });
+          if (conn.status === "removed" && plan.kind !== "installation_status") {
+            return reply.code(202).send({ ignored: "installation_removed" });
+          }
+          const target = {
+            tenantId: conn.tenantId,
+            connectionId: conn.connectionId,
+            installationId,
+          };
+
+          if (plan.kind === "sync_prs") {
+            for (const [i, pr] of plan.prs.entries()) {
+              await deps.queue.send(
+                "github.sync_pr",
+                { ...target, repoId: pr.repoId, fullName: pr.fullName, number: pr.number },
+                { id: idFromKey(["github", delivery || crypto.randomUUID(), String(i)]) },
+              );
+            }
+          } else if (plan.kind === "installation_status") {
+            await deps.db.withTenant(conn.tenantId, async (tx) => {
+              await connectionRepo.setConnectionStatus(tx, conn.connectionId, plan.status);
+              await appendAuditEvent(tx, conn.tenantId, {
+                actorType: "system",
+                actorId: null,
+                action: "connection.status_changed",
+                targetType: "connection",
+                targetId: conn.connectionId,
+                payload: { provider: "github", status: plan.status },
+              });
+            });
+          } else {
+            await backfillAddedRepos(
+              {
+                db: deps.db,
+                enqueue: async (name, data, options) => {
+                  await deps.queue.send(name as QueueName, data, options);
+                },
+              },
+              target,
+              plan.repos,
+            );
+          }
+          return reply.code(202).send({ accepted: plan.kind });
+        },
+      );
+    });
+  }
 
   return app;
 }

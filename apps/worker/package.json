@@ -11,8 +11,11 @@
   },
   "dependencies": {
     "@mm/db": "workspace:*",
+    "@mm/github": "workspace:*",
     "@mm/ingest": "workspace:*",
     "@mm/lake": "workspace:*",
+    "@mm/llm": "workspace:*",
+    "@mm/packs": "workspace:*",
     "@mm/privacy": "workspace:*"
   },
   "devDependencies": {

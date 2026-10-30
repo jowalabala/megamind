@@ -43,6 +43,11 @@ export default async function PrivacyPage() {
               which file and lines, which command), never file contents or tool output.
             </li>
             <li>
+              If your workspace connects GitHub: pull request titles and descriptions (cleaned the
+              same way) and metadata such as files changed, reviews and CI results. Never code. If
+              you link your GitHub account and opt out, your pull requests aren&apos;t imported.
+            </li>
+            <li>
               Secrets (API keys, passwords) and personal data (emails, phone numbers, card numbers,
               teammates&apos; names) are removed before anything is stored. Raw payloads are
               encrypted and deleted after 30 days.
