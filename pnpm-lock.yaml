@@ -180,6 +180,19 @@ importers:
         specifier: ^8.16.0
         version: 8.23.1
 
+  packages/backtest:
+    dependencies:
+      '@mm/db':
+        specifier: workspace:*
+        version: link:../db
+      '@mm/lake':
+        specifier: workspace:*
+        version: link:../lake
+    devDependencies:
+      tsx:
+        specifier: ^4.20.0
+        version: 4.23.15
+
   packages/db:
     dependencies:
       drizzle-orm:
@@ -217,6 +230,9 @@ importers:
         specifier: ^4.1.0
         version: 4.6.7
     devDependencies:
+      '@mm/backtest':
+        specifier: workspace:*
+        version: link:../backtest
       '@mm/llm':
         specifier: workspace:*
         version: link:../llm

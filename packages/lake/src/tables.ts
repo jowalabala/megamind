@@ -87,6 +87,25 @@ export const LAKE_TABLE_DEFS: Record<LakeTableName, LakeTableDef> = {
     ],
     partitions: byDay,
   },
+  judgments: {
+    name: "judgments",
+    columns: [
+      ...common,
+      { name: "task_id", type: "string", required: true },
+      { name: "pack", type: "string", required: true },
+      { name: "ruleset_version", type: "int", required: true },
+      { name: "category", type: "string" },
+      /** success, failure, neutral or inconclusive. */
+      { name: "verdict", type: "string", required: true },
+      /** JSON array of rule outcomes. */
+      { name: "reasons", type: "string", required: true },
+      /** JSON object: the baseline the verdict was measured against. */
+      { name: "baseline", type: "string", required: true },
+      { name: "input_hash", type: "string", required: true },
+      ...times,
+    ],
+    partitions: byDay,
+  },
   metric_observations: {
     name: "metric_observations",
     columns: [

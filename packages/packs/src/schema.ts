@@ -41,6 +41,45 @@ export const ruleSchema = z
   .refine((r) => Object.keys(r).length > 0, { message: "a rule needs at least one condition" });
 export type Rule = z.infer<typeof ruleSchema>;
 
+const conditionSchema = z
+  .object({
+    metric: z.string().regex(METRIC_ID),
+    op: z.enum(["eq", "ne", "lt", "lte", "gt", "gte"]),
+    /** A fixed threshold... */
+    value: z.number().optional(),
+    /** ...or one relative to the team's own recent history. */
+    baseline: z.enum(["p25", "p50", "p75", "mean"]).optional(),
+  })
+  .strict()
+  .refine((c) => (c.value === undefined) !== (c.baseline === undefined), {
+    message: "a condition needs exactly one of value or baseline",
+  });
+export type Condition = z.infer<typeof conditionSchema>;
+
+/**
+ * How the pack decides success. Verdicts: failure if any failure condition holds; success
+ * if every success condition holds; inconclusive if one can't be evaluated (missing metric
+ * or too little history for a baseline); neutral otherwise.
+ */
+export const judgeSchema = z
+  .object({
+    /** Bump on any change: judgments are stored per version and never rewritten. */
+    version: z.number().int().positive(),
+    /** Metrics that must exist before a task is judged at all. */
+    requires: z.array(z.string().regex(METRIC_ID)).min(1),
+    skip_categories: z.array(z.string().regex(CATEGORY_ID)).default([]),
+    failure_if_any: z.array(conditionSchema).default([]),
+    success_if_all: z.array(conditionSchema).min(1),
+    baseline: z
+      .object({
+        days: z.number().int().min(7).max(730).default(180),
+        min_samples: z.number().int().min(5).max(1000).default(20),
+      })
+      .default({ days: 180, min_samples: 20 }),
+  })
+  .strict();
+export type JudgeConfig = z.infer<typeof judgeSchema>;
+
 export const packSchema = z
   .object({
     id: z.string().regex(ID),
@@ -78,9 +117,12 @@ export const packSchema = z
           description: z.string().max(300),
           unit: z.enum(["ratio", "count", "hours", "boolean"]),
           better: z.enum(["higher", "lower"]),
+          /** Days after the work completes before this metric is final. */
+          window_days: z.number().int().min(0).max(365).optional(),
         }),
       )
       .default([]),
+    judge: judgeSchema.optional(),
   })
   .superRefine((p, ctx) => {
     const ids = p.categories.map((c) => c.id);

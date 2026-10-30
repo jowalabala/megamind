@@ -268,7 +268,13 @@ export const actionEvents = pgTable(
 
 // Lake and erasure (migration 0006) ----------------------------------------------------
 
-export const LAKE_TABLES = ["actions", "tasks", "metric_observations", "task_categories"] as const;
+export const LAKE_TABLES = [
+  "actions",
+  "tasks",
+  "metric_observations",
+  "task_categories",
+  "judgments",
+] as const;
 export type LakeTableName = (typeof LAKE_TABLES)[number];
 
 export const lakeOutbox = pgTable("lake_outbox", {
@@ -368,9 +374,57 @@ export const githubPullRequests = pgTable(
     ghUpdatedAt: timestamp("gh_updated_at", { withTimezone: true }).notNull(),
     syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
     lakeEmittedAt: timestamp("lake_emitted_at", { withTimezone: true }),
+    baseSha: text("base_sha"),
+    firstCiState: text("first_ci_state"),
+    revertsPrs: integer("reverts_prs").array().notNull().default([]),
+    revertsShas: text("reverts_shas").array().notNull().default([]),
+    conflictCommits: integer("conflict_commits").notNull().default(0),
+    baseMergeCommits: integer("base_merge_commits").notNull().default(0),
+    szzDoneAt: timestamp("szz_done_at", { withTimezone: true }),
+    metricsFinalAt: timestamp("metrics_final_at", { withTimezone: true }),
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.taskId] })],
 );
+
+// Outcomes and judgments (migration 0008) --------------------------------------------------
+
+export const githubPrLinks = pgTable(
+  "github_pr_links",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    fromTaskId: uuid("from_task_id").notNull(),
+    toTaskId: uuid("to_task_id").notNull(),
+    kind: text("kind", { enum: ["reverts", "fixes"] }).notNull(),
+    evidence: jsonb("evidence").$type<Record<string, number>>().notNull().default({}),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.fromTaskId, t.toTaskId, t.kind] })],
+);
+
+export const VERDICTS = ["success", "failure", "neutral", "inconclusive"] as const;
+export type Verdict = (typeof VERDICTS)[number];
+
+export interface JudgmentReason {
+  rule: string;
+  metric: string;
+  value: number | null;
+  threshold: number | null;
+  result: "true" | "false" | "unknown";
+}
+
+export const judgments = pgTable("judgments", {
+  id: uuid("id").primaryKey(),
+  tenantId: uuid("tenant_id").notNull(),
+  taskId: uuid("task_id").notNull(),
+  pack: text("pack").notNull(),
+  rulesetVersion: integer("ruleset_version").notNull(),
+  category: text("category"),
+  verdict: text("verdict", { enum: VERDICTS }).notNull(),
+  reasons: jsonb("reasons").$type<JudgmentReason[]>().notNull().default([]),
+  baseline: jsonb("baseline").$type<Record<string, Record<string, number>>>().notNull().default({}),
+  inputHash: text("input_hash").notNull(),
+  judgedAt: timestamp("judged_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 /** Every Drizzle table, used by the drift test. */
 export const allTables = {
@@ -393,4 +447,6 @@ export const allTables = {
   erasureRequests,
   connections,
   githubPullRequests,
+  githubPrLinks,
+  judgments,
 };

@@ -2,13 +2,13 @@
 // the raw body before redaction; only the numbers and flags are kept.
 import type { NormalizedPr } from "./normalize.ts";
 
-const TEST_FILE = [
+export const TEST_FILE = [
   /(^|\/)(tests?|__tests__|specs?)\//i,
   /\.(test|spec)\.[a-z0-9]+$/i,
   /_test\.(go|py|rb)$/i,
   /(^|\/)test_[^/]+\.py$/i,
 ];
-const DOC_FILE = [/\.(md|mdx|rst|adoc|txt)$/i, /^docs?\//i];
+export const DOC_FILE = [/\.(md|mdx|rst|adoc|txt)$/i, /^docs?\//i];
 /** Trailers and footers coding agents add; and bots named after them. */
 const AGENT_MARKERS = [
   /co-authored-by:\s*(claude|copilot|cursor|devin|codex|aider)/i,

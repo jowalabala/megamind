@@ -106,6 +106,12 @@ async function seedTenant(slug: string) {
       VALUES (${t.tenantId}, ${prTask}, ${conn!.id}, 1, ${`${slug}/api`}, 1, 'github:42', 'open',
         'main', 'feature', now(), now())`);
     await tx.execute(sql`
+      INSERT INTO github_pr_links (tenant_id, from_task_id, to_task_id, kind)
+      VALUES (${t.tenantId}, ${prTask}, ${taskId}, 'fixes')`);
+    await tx.execute(sql`
+      INSERT INTO judgments (id, tenant_id, task_id, pack, ruleset_version, verdict, input_hash)
+      VALUES (gen_random_uuid(), ${t.tenantId}, ${taskId}, 'engineering', 1, 'success', ${"c".repeat(64)})`);
+    await tx.execute(sql`
       INSERT INTO lake_outbox (tenant_id, member_id, lake_table, event_id, row)
       VALUES (${t.tenantId}, ${member.id}, 'tasks', ${taskId}, '{}')`);
     await tx.execute(sql`

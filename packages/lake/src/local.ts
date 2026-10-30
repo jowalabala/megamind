@@ -111,6 +111,12 @@ export function localLake(options: { dir?: string } = {}): LocalLake {
     async rows(tenantId, table) {
       return dedupe(await storage.read(tenantNamespace(tenantId), table));
     },
+    async scan(tenantId, table, range = {}) {
+      return dedupe(await storage.read(tenantNamespace(tenantId), table)).filter((r) => {
+        const t = Date.parse(String(r.event_time));
+        return (!range.from || t >= range.from.getTime()) && (!range.to || t < range.to.getTime());
+      });
+    },
     async recentActions(tenantId, opts = {}) {
       const rows = dedupe(await storage.read(tenantNamespace(tenantId), "actions"))
         .map((r): LakeActionRow => ({

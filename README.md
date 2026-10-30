@@ -5,23 +5,24 @@ produce results, and turns them into reviewed, versioned skills. See [docs/PLAN.
 
 ## Layout
 
-| Path               | What                                                                   |
-| ------------------ | ---------------------------------------------------------------------- |
-| `apps/web`         | Next.js app: sign-in (WorkOS), onboarding, members, agents, privacy    |
-| `apps/api`         | Fastify: remote MCP (`/mcp`) and REST (`/v1/*`) for agents             |
-| `apps/worker`      | Background jobs: ingest, lake publishing, erasure, hot-index pruning   |
-| `apps/bridge`      | `mm` CLI: local MCP server + Claude Code hooks for automatic capture   |
-| `packages/db`      | Postgres schema (SQL migrations), RLS, tenant-scoped client, job queue |
-| `packages/audit`   | Append-only, hash-chained audit log                                    |
-| `packages/privacy` | PII and secret redaction, with a labelled test corpus                  |
-| `packages/ingest`  | Capture: input schemas, bronze storage, accept and process steps       |
-| `packages/mcp`     | MCP tool definitions shared by the remote server and the bridge        |
-| `packages/lake`    | Iceberg lake: outbox publisher, Athena queries, erasure, provisioning  |
-| `packages/github`  | GitHub App connector: auth, backfill, webhooks, PR sync and features   |
-| `packages/packs`   | Domain packs (YAML): categories, rules, features, metrics; categorizer |
-| `packages/llm`     | Claude on Bedrock: prompt registry, structured output, call log        |
-| `infra`            | AWS CDK: network, data (RDS, S3, KMS), lake (S3 Tables, Firehose), app |
-| `docs/adr`         | Architecture decisions                                                 |
+| Path                | What                                                                   |
+| ------------------- | ---------------------------------------------------------------------- |
+| `apps/web`          | Next.js app: sign-in (WorkOS), onboarding, members, agents, privacy    |
+| `apps/api`          | Fastify: remote MCP (`/mcp`) and REST (`/v1/*`) for agents             |
+| `apps/worker`       | Background jobs: ingest, lake publishing, erasure, hot-index pruning   |
+| `apps/bridge`       | `mm` CLI: local MCP server + Claude Code hooks for automatic capture   |
+| `packages/db`       | Postgres schema (SQL migrations), RLS, tenant-scoped client, job queue |
+| `packages/audit`    | Append-only, hash-chained audit log                                    |
+| `packages/privacy`  | PII and secret redaction, with a labelled test corpus                  |
+| `packages/ingest`   | Capture: input schemas, bronze storage, accept and process steps       |
+| `packages/mcp`      | MCP tool definitions shared by the remote server and the bridge        |
+| `packages/lake`     | Iceberg lake: outbox publisher, Athena queries, erasure, provisioning  |
+| `packages/github`   | GitHub App connector: auth, backfill, webhooks, PR sync and features   |
+| `packages/packs`    | Domain packs (YAML): categories, rules, features, metrics; categorizer |
+| `packages/backtest` | Backtest report from the lake; agreement with hand labels              |
+| `packages/llm`      | Claude on Bedrock: prompt registry, structured output, call log        |
+| `infra`             | AWS CDK: network, data (RDS, S3, KMS), lake (S3 Tables, Firehose), app |
+| `docs/adr`          | Architecture decisions                                                 |
 
 ## Local setup
 
@@ -145,6 +146,24 @@ Members can link their GitHub account on the same page so their PRs are credited
 Every task gets a category from its domain pack (`packages/packs`): the pack's rules first
 (e.g. a `fix:` title or a `bug` label), then the agent's own hint, then Claude Haiku on the
 redacted text. Set `MM_LLM_CATEGORIZE=off` locally to skip the model.
+
+### Outcomes, judging and the backtest
+
+The worker computes each merged PR's outcome once it is 60 days old: whether CI passed first
+time, whether it was reverted, whether a later bug fix traces back to it (SZZ), and review rounds.
+It then judges it against the pack's rules and the team's own baseline. See
+[ADR 0005](docs/adr/0005-outcomes-and-judge.md).
+
+```bash
+pnpm --filter @mm/backtest backtest <tenant-id> --train-end 2026-07-01
+```
+
+```bash
+pnpm --filter @mm/backtest label-agreement <tenant-id> labels.csv
+```
+
+The second compares hand labels (`repo,number,reverted,escaped_defect,ci_first_pass,verdict`)
+with the system's; the bar is 85%.
 
 ### Removing a member
 

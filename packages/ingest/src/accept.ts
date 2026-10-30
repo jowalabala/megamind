@@ -1,8 +1,8 @@
 // API side of ingest: the fast path an agent waits on. It checks opt-out and scope,
 // stores the raw payload in bronze, queues a pointer to it, and returns an id.
 // Nothing is redacted or written to Postgres here; the worker does that.
-import { createHash, randomUUID } from "node:crypto";
-import type { AuthenticatedAgent } from "@mm/db";
+import { randomUUID } from "node:crypto";
+import { idFromKey, type AuthenticatedAgent } from "@mm/db";
 import type { QueueClient, QueueName } from "@mm/db/queue";
 import { bronzeKey, type BronzeKind, type BronzeStore } from "./bronze.ts";
 import type { ActionBatchInput, LogTaskInput, ReportOutcomeInput } from "./schemas.ts";
@@ -46,12 +46,7 @@ export class IngestForbiddenError extends Error {
 }
 
 /** Same key from the same member always maps to the same id, so retries are stored once. */
-export function idFromKey(parts: string[]): string {
-  const h = createHash("sha256").update(parts.join("\u0000")).digest("hex");
-  // Shaped as a version 8 (custom) UUID.
-  const variant = ((parseInt(h[16]!, 16) & 0x3) | 0x8).toString(16);
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-8${h.slice(13, 16)}-${variant}${h.slice(17, 20)}-${h.slice(20, 32)}`;
-}
+export { idFromKey };
 
 async function accept<T>(
   deps: AcceptDeps,

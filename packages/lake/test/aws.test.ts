@@ -151,6 +151,7 @@ describe("athenaLake", () => {
       tasks: 2,
       metric_observations: 0,
       task_categories: 0,
+      judgments: 0,
     });
     expect(sts.calls[0]!.input.RoleArn).toBe(
       `arn:aws:iam::123456789012:role/mastermind/dev/lake/mm-lake-dev-t-${HEX}`,

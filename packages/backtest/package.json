@@ -1,0 +1,22 @@
+{
+  "name": "@mm/backtest",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "backtest": "tsx src/cli/backtest.ts",
+    "label-agreement": "tsx src/cli/label-agreement.ts"
+  },
+  "dependencies": {
+    "@mm/db": "workspace:*",
+    "@mm/lake": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0"
+  }
+}

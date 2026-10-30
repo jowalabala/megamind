@@ -152,3 +152,38 @@ export function categoryRecord(
     },
   };
 }
+
+export function judgmentRecord(
+  j: Base & {
+    /** Unique per (judgment, inputs): a re-judgment with new inputs is a new row. */
+    id: string;
+    taskId: string;
+    pack: string;
+    rulesetVersion: number;
+    category: string | null;
+    verdict: string;
+    reasons: unknown[];
+    baseline: Record<string, unknown>;
+    inputHash: string;
+    judgedAt: Date;
+  },
+): LakeRecord {
+  return {
+    table: "judgments",
+    eventId: j.id,
+    memberId: j.memberId,
+    row: {
+      event_id: j.id,
+      ...base(j),
+      task_id: j.taskId,
+      pack: j.pack,
+      ruleset_version: j.rulesetVersion,
+      category: j.category,
+      verdict: j.verdict,
+      reasons: JSON.stringify(j.reasons),
+      baseline: JSON.stringify(j.baseline),
+      input_hash: j.inputHash,
+      event_time: iso(j.judgedAt),
+    },
+  };
+}

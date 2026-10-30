@@ -201,6 +201,22 @@ export function athenaLake(options: AthenaLakeOptions): LakeAdmin & {
       }
     },
 
+    async scan(tenantId, table, range = {}) {
+      if (!LAKE_TABLES.includes(table)) throw new LakeQueryError(`Unknown table ${table}`);
+      const ts = (d: Date) => `from_iso8601_timestamp(${sqlString(d.toISOString())})`;
+      const where = [
+        range.from ? `event_time >= ${ts(range.from)}` : null,
+        range.to ? `event_time < ${ts(range.to)}` : null,
+      ].filter(Boolean);
+      return query(
+        tenantId,
+        `SELECT * FROM (
+           SELECT *, row_number() OVER (PARTITION BY event_id ORDER BY ingested_at) AS rn
+             FROM ${table} ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+         ) WHERE rn = 1`,
+      );
+    },
+
     async recentActions(tenantId, opts = {}) {
       const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 20), 1), 200);
       const filter = opts.resource

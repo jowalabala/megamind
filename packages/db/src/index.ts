@@ -11,6 +11,7 @@ export {
 } from "./client.ts";
 export { databaseSslFromEnv, databaseUrlFromEnv } from "./env.ts";
 export * from "./constants.ts";
+export { idFromKey } from "./ids.ts";
 export * as agentRepo from "./repos/agents.ts";
 export * as connectionRepo from "./repos/connections.ts";
 export {

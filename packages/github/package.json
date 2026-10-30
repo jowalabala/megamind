@@ -17,6 +17,7 @@
     "zod": "^4.1.0"
   },
   "devDependencies": {
+    "@mm/backtest": "workspace:*",
     "@mm/llm": "workspace:*",
     "@mm/packs": "workspace:*",
     "@types/pg": "^8.15.0",

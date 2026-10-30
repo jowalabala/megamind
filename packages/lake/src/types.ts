@@ -38,6 +38,15 @@ export interface LakeAdmin {
   memberRowCounts(tenantId: string, subject: ErasureSubject): Promise<LakeCounts>;
   /** Logical delete: the rows disappear from every query now; old snapshots expire later. */
   deleteMemberRows(tenantId: string, subject: ErasureSubject): Promise<void>;
+  /**
+   * Every row of a table (de-duplicated on event_id), optionally within an event_time range.
+   * Values come back as stored: JSON columns are strings. For backtests and reports.
+   */
+  scan(
+    tenantId: string,
+    table: LakeTableName,
+    range?: { from?: Date; to?: Date },
+  ): Promise<Record<string, unknown>[]>;
   recentActions(
     tenantId: string,
     options?: { limit?: number; resource?: string },

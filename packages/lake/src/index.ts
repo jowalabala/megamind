@@ -3,7 +3,14 @@ export { localLake, type LocalLake } from "./local.ts";
 export * from "./naming.ts";
 export { enqueueLakeRecords } from "./outbox.ts";
 export { publishOutbox, type PublishOptions, type PublishResult } from "./publisher.ts";
-export { actionRecord, categoryRecord, metricRecord, taskRecord, type LakeRecord } from "./rows.ts";
+export {
+  actionRecord,
+  categoryRecord,
+  judgmentRecord,
+  metricRecord,
+  taskRecord,
+  type LakeRecord,
+} from "./rows.ts";
 export {
   LAKE_TABLE_DEFS,
   LAKE_TABLES,

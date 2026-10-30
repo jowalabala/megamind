@@ -10,9 +10,15 @@ import {
 } from "@mm/ingest";
 import { localLake, processErasures, publishOutbox, type LakeAdmin, type LakeSink } from "@mm/lake";
 import { athenaLake, firehoseSink } from "@mm/lake/aws";
-import { createGithubApp, startGithubWorkers, startPendingBackfills } from "@mm/github";
+import {
+  createGithubApp,
+  finalizeMetrics,
+  runSzzSweep,
+  startGithubWorkers,
+  startPendingBackfills,
+} from "@mm/github";
 import { bedrockTransport, createLlm, dbCallLogger, modelConfigFromEnv } from "@mm/llm";
-import { builtinPacks, categorizeTask, type CategorizeJob } from "@mm/packs";
+import { builtinPacks, categorizeTask, judgeSweep, type CategorizeJob } from "@mm/packs";
 import { comprehendDetector } from "@mm/privacy/comprehend";
 
 const connectionString = databaseUrlFromEnv();
@@ -158,6 +164,14 @@ const timers = [
   ...(githubDeps
     ? [every("github.backfills", 30_000, () => startPendingBackfills(githubDeps))]
     : []),
+  // Outcomes: trace fixes (needs GitHub), finalize mature PR metrics, then judge.
+  every("outcomes", 10 * 60_000, async () => {
+    for (const t of await db.system.listTenantsForJobs()) {
+      if (githubDeps) await runSzzSweep(githubDeps, t.tenantId);
+      await finalizeMetrics({ db, log }, t.tenantId);
+      await judgeSweep({ db, packs, log }, t.tenantId);
+    }
+  }),
   every("hot.prune", 60 * 60_000, async () => {
     for (const t of await db.system.listTenantsForJobs()) {
       const n = await db.withTenant(t.tenantId, (tx) => historyRepo.pruneHotActions(tx, 90));

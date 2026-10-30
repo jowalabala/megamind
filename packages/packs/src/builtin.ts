@@ -127,11 +127,25 @@ features:
   - { id: draft, description: Opened as a draft. }
 
 metrics:
-  - { id: ci.first_pass, description: CI passed on the first run., unit: boolean, better: higher }
-  - { id: pr.reverted, description: Reverted within 30 days of merge., unit: boolean, better: lower }
-  - { id: pr.escaped_defect, description: A later bug fix traces back to this PR., unit: boolean, better: lower }
-  - { id: pr.review_rounds, description: Rounds of requested changes., unit: count, better: lower }
+  - { id: ci.first_pass, description: CI passed on the first commit pushed., unit: boolean, better: higher }
+  - { id: pr.reverted, description: Reverted within 30 days of merge., unit: boolean, better: lower, window_days: 30 }
+  - { id: pr.escaped_defect, description: A bug fix within 60 days traces back to this PR (SZZ)., unit: boolean, better: lower, window_days: 60 }
+  - { id: pr.review_rounds, description: Reviews that requested changes., unit: count, better: lower }
   - { id: pr.hours_to_merge, description: Hours from opening to merge., unit: hours, better: lower }
+  - { id: pr.merge_conflict, description: A commit resolved merge conflicts., unit: boolean, better: lower }
+
+judge:
+  version: 1
+  requires: [pr.reverted, pr.escaped_defect]
+  # Not judged: they say little about how well the work was done.
+  skip_categories: [revert, dependencies, docs, chore]
+  failure_if_any:
+    - { metric: pr.reverted, op: eq, value: 1 }
+    - { metric: pr.escaped_defect, op: eq, value: 1 }
+  success_if_all:
+    - { metric: ci.first_pass, op: eq, value: 1 }
+    - { metric: pr.review_rounds, op: lte, baseline: p75 }
+  baseline: { days: 180, min_samples: 20 }
 `;
 
 export const GENERIC_PACK = `

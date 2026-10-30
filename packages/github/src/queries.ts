@@ -3,11 +3,13 @@ export const PR_FIELDS = `
 fragment PrFields on PullRequest {
   databaseId number title body state isDraft createdAt updatedAt mergedAt closedAt
   author { __typename login ... on User { databaseId } ... on Bot { databaseId } }
-  additions deletions changedFiles baseRefName headRefName headRefOid
+  additions deletions changedFiles baseRefName baseRefOid headRefName headRefOid
   mergeCommit { oid }
   labels(first: 20) { nodes { name } }
   commits { totalCount }
   lastCommit: commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+  firstCommit: commits(first: 1) { nodes { commit { statusCheckRollup { state } } } }
+  commitList: commits(first: 100) { nodes { commit { messageHeadline parents { totalCount } } } }
   reviews(first: 50) {
     nodes { state submittedAt author { __typename login ... on User { databaseId } ... on Bot { databaseId } } }
   }
@@ -58,12 +60,17 @@ export interface GqlPr {
   deletions: number;
   changedFiles: number;
   baseRefName: string;
+  baseRefOid?: string | null;
   headRefName: string;
   headRefOid: string | null;
   mergeCommit: { oid: string } | null;
   labels: { nodes: { name: string }[] } | null;
   commits: { totalCount: number };
   lastCommit: { nodes: { commit: { statusCheckRollup: { state: string } | null } }[] } | null;
+  firstCommit?: { nodes: { commit: { statusCheckRollup: { state: string } | null } }[] } | null;
+  commitList?: {
+    nodes: { commit: { messageHeadline: string; parents: { totalCount: number } } }[];
+  } | null;
   reviews: {
     nodes: { state: string; submittedAt: string | null; author: GqlActor | null }[];
   } | null;

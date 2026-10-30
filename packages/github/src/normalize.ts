@@ -24,6 +24,14 @@ export interface NormalizedPr {
   reviews: { state: string; authorKey: string; submittedAt: string | null }[];
   closingIssues: number[];
   ciState: string | null;
+  /** CI state of the first commit: did it pass the first time? */
+  firstCiState: string | null;
+  baseSha: string | null;
+  /** PRs and commits this PR says it reverts. */
+  revertsPrs: number[];
+  revertsShas: string[];
+  conflictCommits: number;
+  baseMergeCommits: number;
   openedAt: Date;
   mergedAt: Date | null;
   closedAt: Date | null;
@@ -40,8 +48,29 @@ export function actorKey(a: GqlActor | null): string {
 
 const sha = (s: string | null | undefined) => (s && /^[0-9a-f]{40}$/.test(s) ? s : null);
 
+/**
+ * What a PR says it reverts. GitHub's revert button writes "Reverts owner/repo#12"; git
+ * writes "This reverts commit <sha>". Read from the raw body; only numbers and SHAs are kept.
+ */
+export function parseReverts(body: string, fullName: string): { prs: number[]; shas: string[] } {
+  const repo = fullName.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const prs = new Set<number>();
+  for (const m of body.matchAll(new RegExp(`\\breverts\\s+(?:${repo})?#(\\d+)`, "gi"))) {
+    prs.add(Number(m[1]));
+  }
+  const shas = new Set<string>();
+  for (const m of body.matchAll(/\bthis reverts commit ([0-9a-f]{40})\b/gi))
+    shas.add(m[1]!.toLowerCase());
+  return { prs: [...prs].slice(0, 20), shas: [...shas].slice(0, 20) };
+}
+
 export function normalizePr(repo: { id: number; fullName: string }, pr: GqlPr): NormalizedPr {
   const isBot = pr.author?.__typename === "Bot";
+  const reverts = parseReverts(pr.body ?? "", repo.fullName);
+  const headlines = (pr.commitList?.nodes ?? []).map((n) => n.commit);
+  const baseMerge = new RegExp(
+    `^Merge (remote-tracking )?branch '(origin/)?${pr.baseRefName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}'`,
+  );
   return {
     repoId: repo.id,
     repo: repo.fullName.toLowerCase(),
@@ -71,6 +100,14 @@ export function normalizePr(repo: { id: number; fullName: string }, pr: GqlPr): 
       .map((r) => ({ state: r.state, authorKey: actorKey(r.author), submittedAt: r.submittedAt })),
     closingIssues: (pr.closingIssuesReferences?.nodes ?? []).map((i) => i.number),
     ciState: pr.lastCommit?.nodes[0]?.commit.statusCheckRollup?.state ?? null,
+    firstCiState: pr.firstCommit?.nodes[0]?.commit.statusCheckRollup?.state ?? null,
+    baseSha: sha(pr.baseRefOid),
+    revertsPrs: reverts.prs,
+    revertsShas: reverts.shas,
+    conflictCommits: headlines.filter((c) => /\bconflict/i.test(c.messageHeadline)).length,
+    baseMergeCommits: headlines.filter(
+      (c) => c.parents.totalCount > 1 && baseMerge.test(c.messageHeadline),
+    ).length,
     openedAt: new Date(pr.createdAt),
     mergedAt: pr.mergedAt ? new Date(pr.mergedAt) : null,
     closedAt: pr.closedAt ? new Date(pr.closedAt) : null,

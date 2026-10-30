@@ -143,7 +143,7 @@ export function fixtureRepos() {
 
 export interface FakeGithub {
   url: string;
-  data: ReturnType<typeof fixtureRepos>;
+  data: { repos: { id: number; full_name: string; archived: boolean; prs: GqlPr[] }[] };
   calls: string[];
   /** Respond to the next N GraphQL calls with a rate-limit error. */
   rateLimitNext: number;
@@ -160,8 +160,23 @@ function verifyJwt(jwt: string): boolean {
   return ok && claims.iss === APP_ID && claims.exp * 1000 > Date.now();
 }
 
-export async function startFakeGithub(pageSize = 4): Promise<FakeGithub> {
-  const data = fixtureRepos();
+export interface FakeExtras {
+  /** REST pulls/{n}/files for SZZ. */
+  files?: (
+    fullName: string,
+    number: number,
+  ) => { filename: string; status: string; patch?: string }[];
+  /** GraphQL blame at a commit. */
+  blame?: (oid: string, path: string) => unknown;
+}
+
+export async function startFakeGithub(
+  pageSize = 4,
+  data: {
+    repos: { id: number; full_name: string; archived: boolean; prs: GqlPr[] }[];
+  } = fixtureRepos(),
+  extras: FakeExtras = {},
+): Promise<FakeGithub> {
   const tokens = new Set<string>();
   const calls: string[] = [];
   const state = { rateLimitNext: 0 };
@@ -191,6 +206,10 @@ export async function startFakeGithub(pageSize = 4): Promise<FakeGithub> {
       const token = auth.replace(/^(token|bearer) /i, "");
       if (!tokens.has(token)) return send(401, { message: "Bad credentials" });
 
+      const filesPath = /^\/repos\/([^/]+)\/([^/]+)\/pulls\/(\d+)\/files$/.exec(url.pathname);
+      if (req.method === "GET" && filesPath && extras.files) {
+        return send(200, extras.files(`${filesPath[1]}/${filesPath[2]}`, Number(filesPath[3])));
+      }
       if (req.method === "GET" && url.pathname === "/installation/repositories") {
         return send(200, {
           repositories: data.repos.map(({ id, full_name, archived }) => ({
@@ -214,8 +233,20 @@ export async function startFakeGithub(pageSize = 4): Promise<FakeGithub> {
         }
         const { query, variables } = JSON.parse(body) as {
           query: string;
-          variables: { owner: string; name: string; cursor?: string | null; number?: number };
+          variables: {
+            owner: string;
+            name: string;
+            cursor?: string | null;
+            number?: number;
+            oid?: string;
+            path?: string;
+          };
         };
+        if (query.includes("query Blame") && extras.blame) {
+          return send(200, {
+            data: { repository: { object: extras.blame(variables.oid!, variables.path!) } },
+          });
+        }
         const repo = data.repos.find(
           (r) => r.full_name.toLowerCase() === `${variables.owner}/${variables.name}`.toLowerCase(),
         );

@@ -251,6 +251,7 @@ describe("processErasures", () => {
       tasks: 0,
       metric_observations: 0,
       task_categories: 0,
+      judgments: 0,
     });
     // The buffered row lands after the first pass...
     await lake.put(
