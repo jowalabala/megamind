@@ -86,6 +86,7 @@ async function main(argv: string[]): Promise<number> {
       const info = repoInfo(cwd ?? process.cwd());
       await runPresence({
         sessionId,
+        cwd: cwd ?? process.cwd(),
         session: { repo: info?.repo, branch: info?.branch ?? undefined, tool: "claude_code" },
         getToken: async () => {
           const t = await api.post<{ token: string; gateway_url: string }>(

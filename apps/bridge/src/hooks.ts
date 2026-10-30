@@ -5,7 +5,13 @@ import { toActionEvent, type HookPayload } from "./capture.ts";
 import { logError, readConfig } from "./config.ts";
 import { loadKey } from "./credentials.ts";
 import { repoInfo } from "./git.ts";
-import { presenceContext, requestStop, startPresenceDaemon, touchAlive } from "./presence.ts";
+import {
+  presenceContext,
+  requestStop,
+  startPresenceDaemon,
+  takeAlerts,
+  touchAlive,
+} from "./presence.ts";
 import { append, flush, flushDue } from "./spool.ts";
 
 export const HOOK_EVENTS = {
@@ -21,7 +27,9 @@ const CONTEXT = [
   "Master Mind is on for this session. Your tool use is captured as short summaries",
   "(secrets are removed on this machine first) so the team can learn what works.",
   "Before non-trivial work, call the master-mind search_history tool to see related past work",
-  "and how it turned out; whats_happening shows teammates' agents working right now.",
+  "and how it turned out. Call announce_intent when you start a task, with the files you expect",
+  "to touch: you'll be alerted if a teammate's agent is changing the same code.",
+  "whats_happening shows teammates' agents working right now.",
   "When you finish a meaningful task, call log_task.",
 ].join(" ");
 
@@ -53,7 +61,9 @@ export async function runHook(name: HookName, payload: HookPayload): Promise<str
     }
 
     if (name === "user-prompt-submit") {
-      const context = sessionId ? presenceContext(sessionId) : null;
+      const context = sessionId
+        ? [takeAlerts(sessionId), presenceContext(sessionId)].filter(Boolean).join("\n\n") || null
+        : null;
       return context
         ? JSON.stringify({
             hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: context },
@@ -61,12 +71,20 @@ export async function runHook(name: HookName, payload: HookPayload): Promise<str
         : null;
     }
 
+    let reply: string | null = null;
     if (name === "post-tool-use") {
       if (!sessionId) return null;
       touchAlive(sessionId);
+      // Overlap alerts reach the agent on its next tool call, not only its next prompt.
+      const alerts = takeAlerts(sessionId);
+      if (alerts) {
+        reply = JSON.stringify({
+          hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: alerts },
+        });
+      }
       const info = repoInfo(payload.cwd ?? process.cwd());
       const event = toActionEvent(payload, info);
-      if (!event) return null;
+      if (!event) return reply;
       append(
         {
           id: sessionId,
@@ -76,13 +94,14 @@ export async function runHook(name: HookName, payload: HookPayload): Promise<str
         },
         event,
       );
-      if (!flushDue(sessionId)) return null;
+      if (!flushDue(sessionId)) return reply;
     }
 
     if (name === "session-end" && sessionId) requestStop(sessionId);
     // post-tool-use (when due), stop and session-end send what's spooled.
     const api = apiOrNull();
     if (api) await flush(api);
+    return reply;
   } catch (err) {
     logError(`hook ${name}`, err);
   }

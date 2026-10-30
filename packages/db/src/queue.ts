@@ -14,6 +14,7 @@ export const QUEUES = {
   "ingest.task": { retryLimit: 5, retryDelay: 5, retryBackoff: true, retryDelayMax: 300 },
   "ingest.outcome": { retryLimit: 8, retryDelay: 5, retryBackoff: true, retryDelayMax: 600 },
   "ingest.actions": { retryLimit: 5, retryDelay: 5, retryBackoff: true, retryDelayMax: 300 },
+  "ingest.intent": { retryLimit: 5, retryDelay: 5, retryBackoff: true, retryDelayMax: 300 },
   "categorize.task": { retryLimit: 5, retryDelay: 10, retryBackoff: true, retryDelayMax: 600 },
   "github.sync_pr": { retryLimit: 6, retryDelay: 10, retryBackoff: true, retryDelayMax: 900 },
   "github.backfill_repo": {

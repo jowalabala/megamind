@@ -170,6 +170,8 @@ describe("remote MCP", () => {
     const client = await mcpClient(keys.dana!);
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
+      "announce_intent",
+      "check_overlaps",
       "log_task",
       "report_outcome",
       "search_history",
@@ -531,5 +533,38 @@ describe("live awareness (week 6)", () => {
       headers: { authorization: `Bearer ${keys.gina}` },
     });
     expect(((await other.json()) as { sessions: unknown[] }).sessions).toEqual([]);
+  });
+});
+
+describe("intents and overlaps (week 7)", () => {
+  it("announce_intent goes through ingest and is stored redacted; check_overlaps answers", async () => {
+    const noSession = await post("/v1/intents", { description: "x" }, keys.dana);
+    expect(noSession.status).toBe(403);
+    const client = await mcpClient(keys.dana!);
+    const r = await client.callTool({
+      name: "announce_intent",
+      arguments: {
+        description: `Proration fix; token ${AWS_KEY} for testing`,
+        resources: ["git:github.com/acme/api:src/billing/proration.ts"],
+        session: { id: "cc-intent", repo: "github.com/acme/api" },
+      },
+    });
+    expect(r.isError).toBeFalsy();
+    const id = (r.structuredContent as { intent_id: string }).intent_id;
+    const stored = await waitFor(async () => {
+      const rows = await db.withTenant(tenants.acme!, (tx) =>
+        tx.execute<{ description_redacted: string }>(
+          sql`SELECT description_redacted FROM intents WHERE id = ${id}`,
+        ),
+      );
+      return rows.rows[0];
+    });
+    expect(stored.description_redacted).not.toContain(AWS_KEY);
+    const o = await client.callTool({
+      name: "check_overlaps",
+      arguments: { session_id: "cc-intent" },
+    });
+    expect((o.structuredContent as { overlaps: unknown[] }).overlaps).toEqual([]);
+    await client.close();
   });
 });

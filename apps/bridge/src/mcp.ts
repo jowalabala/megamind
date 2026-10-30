@@ -10,7 +10,8 @@ import {
   type CaptureResult,
   type SearchHistoryResult,
 } from "@mm/mcp";
-import type { PresenceEntry } from "@mm/realtime";
+import type { OverlapAlert, PresenceEntry } from "@mm/realtime";
+import { currentSession } from "./presence.ts";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ApiError, createApi, type Api } from "./api.ts";
@@ -68,8 +69,34 @@ export function createBridgeServer(): McpServer {
         toCapture(await api.post<Accepted>("/v1/outcomes", { ...input, note: keep(input.note) })),
       ),
   });
+  // This Claude Code session, found through its presence process (same working directory).
+  const session = () => {
+    const s = currentSession(process.cwd());
+    if (!s)
+      throw new ToolUserError(
+        "No live Master Mind session here yet (the SessionStart hook starts one).",
+      );
+    return s;
+  };
   registerAwarenessTools(server, {
     whatsHappening: () => call((api) => api.get<{ sessions: PresenceEntry[] }>("/v1/presence")),
+    announceIntent: (input) =>
+      call(async (api) => {
+        const s = session();
+        return toCapture(
+          await api.post<Accepted>("/v1/intents", {
+            description: stripSecrets(input.description),
+            resources: input.resources,
+            session: { id: s.sessionId, repo: s.repo, branch: s.branch, tool: "claude_code" },
+          }),
+        );
+      }),
+    checkOverlaps: () =>
+      call((api) =>
+        api.get<{ overlaps: OverlapAlert[] }>(
+          `/v1/overlaps?session_id=${encodeURIComponent(session().sessionId)}`,
+        ),
+      ),
   });
   registerHistoryTools(server, {
     searchHistory: (input) =>

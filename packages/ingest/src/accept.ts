@@ -5,7 +5,12 @@ import { randomUUID } from "node:crypto";
 import { idFromKey, type AuthenticatedAgent } from "@mm/db";
 import type { QueueClient, QueueName } from "@mm/db/queue";
 import { bronzeKey, type BronzeKind, type BronzeStore } from "./bronze.ts";
-import type { ActionBatchInput, LogTaskInput, ReportOutcomeInput } from "./schemas.ts";
+import type {
+  ActionBatchInput,
+  AnnounceIntentInput,
+  LogTaskInput,
+  ReportOutcomeInput,
+} from "./schemas.ts";
 
 export type IngestSource = "mcp" | "bridge";
 
@@ -126,4 +131,15 @@ export function acceptActions(
     ...input.events.map((e) => e.id),
   ]);
   return accept(deps, agent, "actions", "ingest.actions", id, input, source);
+}
+
+export function acceptIntent(
+  deps: AcceptDeps,
+  agent: AuthenticatedAgent,
+  input: AnnounceIntentInput,
+  source: IngestSource = "mcp",
+) {
+  if (!input.session)
+    throw new IngestForbiddenError("announce_intent needs your session (id, and repo if any).");
+  return accept(deps, agent, "intent", "ingest.intent", randomUUID(), input, source);
 }

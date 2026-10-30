@@ -31,9 +31,26 @@ export const presenceEntry = z.object({
 });
 export type PresenceEntry = z.infer<typeof presenceEntry>;
 
+/** An overlap with another live session, as one side sees it. */
+export interface OverlapAlert {
+  id: string;
+  kind: "same_lines" | "same_resource" | "related_work";
+  severity: "high" | "medium" | "low";
+  resource: string;
+  with: string;
+  your_lines: [number, number][];
+  their_lines: [number, number][];
+  shared_lines: [number, number][];
+  similarity: number | null;
+  first_seen: string;
+  /** One sentence for the agent, e.g. "Conflict likely: Lior is changing the same lines of ...". */
+  text: string;
+}
+
 export type ServerMessage =
   | { type: "welcome"; session_id: string }
   | { type: "presence"; sessions: PresenceEntry[] }
+  | { type: "alert"; alerts: OverlapAlert[] }
   | { type: "error"; code: string; message: string };
 
 /** Close codes (4000-4999 are application-defined). */

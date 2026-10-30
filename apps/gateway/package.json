@@ -11,12 +11,14 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@mm/awareness": "workspace:*",
     "@mm/db": "workspace:*",
     "@mm/ingest": "workspace:*",
     "@mm/realtime": "workspace:*",
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@mm/awareness": "workspace:*",
     "@mm/bridge": "workspace:*",
     "@types/ws": "^8.18.0",
     "tsx": "^4.20.0"

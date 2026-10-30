@@ -44,6 +44,9 @@ importers:
       '@mm/audit':
         specifier: workspace:*
         version: link:../../packages/audit
+      '@mm/awareness':
+        specifier: workspace:*
+        version: link:../../packages/awareness
       '@mm/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -97,6 +100,9 @@ importers:
 
   apps/gateway:
     dependencies:
+      '@mm/awareness':
+        specifier: workspace:*
+        version: link:../../packages/awareness
       '@mm/db':
         specifier: workspace:*
         version: link:../../packages/db
@@ -211,6 +217,19 @@ importers:
         specifier: ^8.16.0
         version: 8.23.1
 
+  packages/awareness:
+    dependencies:
+      '@mm/db':
+        specifier: workspace:*
+        version: link:../db
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.15.0
+        version: 8.23.1
+      pg:
+        specifier: ^8.16.0
+        version: 8.23.1
+
   packages/backtest:
     dependencies:
       '@mm/db':
@@ -288,6 +307,9 @@ importers:
       '@mm/audit':
         specifier: workspace:*
         version: link:../audit
+      '@mm/awareness':
+        specifier: workspace:*
+        version: link:../awareness
       '@mm/db':
         specifier: workspace:*
         version: link:../db
@@ -433,10 +455,19 @@ importers:
       '@mm/llm':
         specifier: workspace:*
         version: link:../llm
+      '@mm/privacy':
+        specifier: workspace:*
+        version: link:../privacy
       zod:
         specifier: ^4.1.0
         version: 4.6.7
     devDependencies:
+      '@types/pg':
+        specifier: ^8.15.0
+        version: 8.23.1
+      pg:
+        specifier: ^8.16.0
+        version: 8.23.1
       tsx:
         specifier: ^4.20.0
         version: 4.23.15

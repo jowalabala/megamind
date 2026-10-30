@@ -7,13 +7,22 @@
 // idle (no tool use) for 20 minutes.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import {
   CLOSE,
   HEARTBEAT_MS,
   PROTOCOL,
   TOKEN_PROTOCOL_PREFIX,
+  type OverlapAlert,
   type PresenceEntry,
 } from "@mm/realtime";
 import { home } from "./config.ts";
@@ -27,6 +36,8 @@ export const files = (sessionId: string) => ({
   alive: `${base(sessionId)}.alive`,
   stop: `${base(sessionId)}.stop`,
   injected: `${base(sessionId)}.injected`,
+  alerts: `${base(sessionId)}.alerts.json`,
+  info: `${base(sessionId)}.json`,
 });
 
 const IDLE_MS = 20 * 60_000;
@@ -34,6 +45,7 @@ const IDLE_MS = 20 * 60_000;
 export interface PresenceDeps {
   sessionId: string;
   session: { repo?: string; branch?: string; tool: string; private?: boolean };
+  cwd?: string;
   getToken: () => Promise<{ token: string; gatewayUrl: string }>;
   WebSocketImpl?: typeof WebSocket;
   heartbeatMs?: number;
@@ -49,6 +61,17 @@ export async function runPresence(deps: PresenceDeps): Promise<void> {
   writeFileSync(f.pid, String(process.pid), { mode: 0o600 });
   writeFileSync(f.alive, "", { mode: 0o600 });
   rmSync(f.stop, { force: true });
+  // Lets this session's MCP server (same working directory) find its session id.
+  writeFileSync(
+    f.info,
+    JSON.stringify({
+      sessionId: deps.sessionId,
+      cwd: deps.cwd ?? null,
+      ...deps.session,
+      startedAt: new Date().toISOString(),
+    }),
+    { mode: 0o600 },
+  );
   const WS = deps.WebSocketImpl ?? WebSocket;
   let ws: WebSocket | null = null;
   let stopping = false;
@@ -76,14 +99,25 @@ export async function runPresence(deps: PresenceDeps): Promise<void> {
       };
       sock.onmessage = (e) => {
         try {
-          const m = JSON.parse(String(e.data)) as { type: string; sessions?: PresenceEntry[] };
+          const m = JSON.parse(String(e.data)) as {
+            type: string;
+            sessions?: PresenceEntry[];
+            alerts?: OverlapAlert[];
+          };
           if (m.type === "presence") {
             writeFileSync(
               f.presence,
               JSON.stringify({ at: new Date().toISOString(), sessions: m.sessions }),
-              {
-                mode: 0o600,
-              },
+              { mode: 0o600 },
+            );
+          } else if (m.type === "alert" && m.alerts?.length) {
+            // Queued for the next hook to tell the agent.
+            const pending = readPendingAlerts(deps.sessionId);
+            const known = new Set(pending.map((a) => a.id));
+            writeFileSync(
+              f.alerts,
+              JSON.stringify([...pending, ...m.alerts.filter((a) => !known.has(a.id))]),
+              { mode: 0o600 },
             );
           }
         } catch {
@@ -129,7 +163,8 @@ export async function runPresence(deps: PresenceDeps): Promise<void> {
     }
   } finally {
     clearInterval(watcher);
-    for (const p of [f.pid, f.presence, f.stop, f.injected]) rmSync(p, { force: true });
+    for (const p of [f.pid, f.presence, f.stop, f.injected, f.alerts, f.info])
+      rmSync(p, { force: true });
   }
 }
 
@@ -207,4 +242,53 @@ export function presenceContext(sessionId: string): string | null {
     "Master Mind: teammates' agents active right now (call whats_happening for details):",
     ...lines,
   ].join("\n");
+}
+
+export function readPendingAlerts(sessionId: string): OverlapAlert[] {
+  try {
+    return JSON.parse(readFileSync(files(sessionId).alerts, "utf8")) as OverlapAlert[];
+  } catch {
+    return [];
+  }
+}
+
+/** New overlap alerts for the agent (once each), as context text; null when there are none. */
+export function takeAlerts(sessionId: string): string | null {
+  const pending = readPendingAlerts(sessionId);
+  if (pending.length === 0) return null;
+  rmSync(files(sessionId).alerts, { force: true });
+  return [
+    "Master Mind overlap alert:",
+    ...pending.map((a) => `- ${a.text}`),
+    "Consider checking with them before continuing (whats_happening shows who is active).",
+  ].join("\n");
+}
+
+/** The live session started from `cwd` (newest first), for the MCP server of that session. */
+export function currentSession(
+  cwd: string,
+): { sessionId: string; repo?: string; branch?: string } | null {
+  let best: { sessionId: string; repo?: string; branch?: string; startedAt: string } | null = null;
+  let entries: string[] = [];
+  try {
+    entries = readdirSync(sessionsDir()).filter((n) => /^[0-9a-f]{32}\.json$/.test(n));
+  } catch {
+    return null;
+  }
+  for (const name of entries) {
+    try {
+      const info = JSON.parse(readFileSync(join(sessionsDir(), name), "utf8")) as {
+        sessionId: string;
+        cwd: string | null;
+        repo?: string;
+        branch?: string;
+        startedAt: string;
+      };
+      if (info.cwd !== cwd || !running(files(info.sessionId).pid)) continue;
+      if (!best || info.startedAt > best.startedAt) best = info;
+    } catch {
+      // skip unreadable files
+    }
+  }
+  return best ? { sessionId: best.sessionId, repo: best.repo, branch: best.branch } : null;
 }

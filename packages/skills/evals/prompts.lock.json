@@ -1,0 +1,18 @@
+{
+  "skills.extract": {
+    "version": 1,
+    "fingerprint": "72fca8158555aa68c085f87dc062581ff3542b1427654b7f7add1afb9421d649"
+  },
+  "skills.verify": {
+    "version": 1,
+    "fingerprint": "731ae8a6df5a748432153a46051a8cefd2ab8a800442c46d049800934514f93a"
+  },
+  "skills.rubric": {
+    "version": 1,
+    "fingerprint": "7231efe05aa5644d3ac67da6b605c2627236a6fcbaedf0f5206763fc5de37640"
+  },
+  "skills.dedupe": {
+    "version": 1,
+    "fingerprint": "8a81a0b37af3c49962d3ba348e350689d3126e4588138b1aae873b5cb9bc36ff"
+  }
+}

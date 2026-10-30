@@ -13,7 +13,7 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3";
 
-export type BronzeKind = "task" | "outcome" | "actions";
+export type BronzeKind = "task" | "outcome" | "actions" | "intent";
 
 export interface BronzeStore {
   put(key: string, body: unknown): Promise<void>;

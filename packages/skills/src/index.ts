@@ -17,3 +17,28 @@ export {
   type ExtractResult,
   type SkillDraftOutput,
 } from "./extract.ts";
+export {
+  dedupePrompt,
+  DUPLICATE_CANDIDATE,
+  gateDraft,
+  practiceKey,
+  practiceSimilarity,
+  practiceWords,
+  rescan,
+  RUBRIC_MEAN_MIN,
+  RUBRIC_MIN,
+  rubricPasses,
+  rubricPrompt,
+  verifyPrompt,
+  type GateOutcome,
+  type RescanResult,
+  type Rubric,
+} from "./gate.ts";
+export {
+  evalCase,
+  fingerprint,
+  GATED_PROMPTS,
+  gradeExtraction,
+  type EvalCase,
+  type Grade,
+} from "./evals.ts";

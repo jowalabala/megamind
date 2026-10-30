@@ -8,6 +8,7 @@ import {
   eq,
   externalRefs,
   inArray,
+  intents,
   members,
   metricObservations,
   tasks,
@@ -15,6 +16,7 @@ import {
   type TenantTx,
 } from "@mm/db";
 import type { QueueClient } from "@mm/db/queue";
+import { detectOverlaps } from "@mm/awareness";
 import { actionRecord, enqueueLakeRecords, metricRecord, taskRecord } from "@mm/lake";
 import { mergeCounts, type Redactor } from "@mm/privacy";
 import { idFromKey, type BronzeEnvelope, type IngestJob } from "./accept.ts";
@@ -22,6 +24,7 @@ import type { BronzeStore } from "./bronze.ts";
 import type { RedactorFor } from "./redaction.ts";
 import {
   actionBatchInput,
+  announceIntentInput,
   logTaskInput,
   reportOutcomeInput,
   type SessionInput,
@@ -356,6 +359,48 @@ export async function processActions(deps: ProcessDeps, job: IngestJob): Promise
         }),
       ),
     );
+    // Live awareness: does what this session just touched overlap anyone else's work?
+    await detectOverlaps(tx, job.tenantId, sessionId);
+    return "stored" as const;
+  });
+}
+
+/** "What I'm working on now": replaces the session's previous intent, then checks overlaps. */
+export async function processIntent(deps: ProcessDeps, job: IngestJob): Promise<ProcessOutcome> {
+  const env = await loadEnvelope(deps, job);
+  if (!env) return "dropped_expired";
+  const parsed = announceIntentInput.parse(env.payload);
+  if (!parsed.session) throw new Error(`Intent ${job.id} has no session`);
+  const input = { ...parsed, session: parsed.session };
+  if (await deps.db.withTenant(job.tenantId, (tx) => memberOptedOut(tx, job.memberId))) {
+    return dropRaw(deps, job, "dropped_opt_out");
+  }
+  const r = await deps.redactorFor(job.tenantId);
+  const session = await redactSession(r, input.session);
+  const description = await r.redact(input.description);
+  const resources = await Promise.all(input.resources.map(async (x) => (await r.redact(x)).text));
+
+  return deps.db.withTenant(job.tenantId, async (tx) => {
+    if (await memberOptedOut(tx, job.memberId)) return "dropped_opt_out" as const;
+    const sess = await upsertSession(tx, job, input.session, session.context);
+    await tx
+      .update(intents)
+      .set({ status: "done", updatedAt: new Date() })
+      .where(and(eq(intents.sessionId, sess.id), eq(intents.status, "active")));
+    const inserted = await tx
+      .insert(intents)
+      .values({
+        id: job.id,
+        tenantId: job.tenantId,
+        sessionId: sess.id,
+        memberId: job.memberId,
+        descriptionRedacted: clip(description.text, 2_000),
+        resources,
+      })
+      .onConflictDoNothing()
+      .returning({ id: intents.id });
+    if (inserted.length === 0) return "duplicate" as const;
+    await detectOverlaps(tx, job.tenantId, sess.id);
     return "stored" as const;
   });
 }
@@ -382,4 +427,5 @@ export async function startIngestWorkers(
   await queue.work<IngestJob>("ingest.task", run(processTask, "ingest.task"));
   await queue.work<IngestJob>("ingest.outcome", run(processOutcome, "ingest.outcome"));
   await queue.work<IngestJob>("ingest.actions", run(processActions, "ingest.actions"));
+  await queue.work<IngestJob>("ingest.intent", run(processIntent, "ingest.intent"));
 }

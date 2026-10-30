@@ -443,7 +443,7 @@ export const skillDrafts = pgTable("skill_drafts", {
   category: text("category").notNull(),
   windowFrom: timestamp("window_from", { withTimezone: true }),
   windowTo: timestamp("window_to", { withTimezone: true }).notNull(),
-  status: text("status", { enum: ["draft", "rejected"] })
+  status: text("status", { enum: ["draft", "rejected", "accepted"] })
     .notNull()
     .default("draft"),
   title: text("title").notNull(),
@@ -456,7 +456,75 @@ export const skillDrafts = pgTable("skill_drafts", {
   promptId: text("prompt_id").notNull(),
   promptVersion: integer("prompt_version").notNull(),
   createdAt: createdAt(),
+  gate: jsonb("gate").$type<Record<string, unknown>>(),
+  skillId: uuid("skill_id"),
 });
+
+// Awareness and skills (migration 0010) -----------------------------------------------------
+
+export const intents = pgTable("intents", {
+  id: uuid("id").primaryKey(),
+  tenantId: uuid("tenant_id").notNull(),
+  sessionId: uuid("session_id").notNull(),
+  memberId: uuid("member_id").notNull(),
+  descriptionRedacted: text("description_redacted").notNull(),
+  resources: text("resources").array().notNull().default([]),
+  status: text("status", { enum: ["active", "done", "abandoned"] })
+    .notNull()
+    .default("active"),
+  createdAt: createdAt(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const OVERLAP_KINDS = ["same_lines", "same_resource", "related_work"] as const;
+export type OverlapKind = (typeof OVERLAP_KINDS)[number];
+
+export const sessionOverlaps = pgTable("session_overlaps", {
+  id: uuid("id").primaryKey(),
+  tenantId: uuid("tenant_id").notNull(),
+  sessionA: uuid("session_a").notNull(),
+  sessionB: uuid("session_b").notNull(),
+  kind: text("kind", { enum: OVERLAP_KINDS }).notNull(),
+  severity: text("severity", { enum: ["high", "medium", "low"] }).notNull(),
+  resource: text("resource").notNull(),
+  detail: jsonb("detail").$type<Record<string, unknown>>().notNull().default({}),
+  firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  notifiedAAt: timestamp("notified_a_at", { withTimezone: true }),
+  notifiedBAt: timestamp("notified_b_at", { withTimezone: true }),
+});
+
+export const skills = pgTable("skills", {
+  id: uuid("id").primaryKey(),
+  tenantId: uuid("tenant_id").notNull(),
+  pack: text("pack").notNull(),
+  category: text("category").notNull(),
+  practiceKey: text("practice_key").notNull(),
+  title: text("title").notNull(),
+  status: text("status", { enum: ["in_review", "approved", "retired"] })
+    .notNull()
+    .default("in_review"),
+  currentVersion: integer("current_version").notNull().default(1),
+  variantOf: uuid("variant_of"),
+  createdAt: createdAt(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const skillVersions = pgTable(
+  "skill_versions",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    skillId: uuid("skill_id").notNull(),
+    version: integer("version").notNull(),
+    title: text("title").notNull(),
+    body: jsonb("body").$type<SkillDraftBody>().notNull(),
+    evidence: jsonb("evidence").$type<{ success: string[]; failure: string[] }>().notNull(),
+    gate: jsonb("gate").$type<Record<string, unknown>>().notNull(),
+    sourceDraftId: uuid("source_draft_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.skillId, t.version] })],
+);
 
 /** Every Drizzle table, used by the drift test. */
 export const allTables = {
@@ -482,4 +550,8 @@ export const allTables = {
   githubPrLinks,
   judgments,
   skillDrafts,
+  intents,
+  sessionOverlaps,
+  skills,
+  skillVersions,
 };

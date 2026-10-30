@@ -1,5 +1,6 @@
 export {
   acceptActions,
+  acceptIntent,
   acceptOutcome,
   acceptTask,
   idFromKey,
@@ -21,6 +22,7 @@ export {
 } from "./bronze.ts";
 export {
   processActions,
+  processIntent,
   processOutcome,
   processTask,
   RetryLaterError,

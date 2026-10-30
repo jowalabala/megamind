@@ -5,24 +5,28 @@ produce results, and turns them into reviewed, versioned skills. See [docs/PLAN.
 
 ## Layout
 
-| Path                | What                                                                   |
-| ------------------- | ---------------------------------------------------------------------- |
-| `apps/web`          | Next.js app: sign-in (WorkOS), onboarding, members, agents, privacy    |
-| `apps/api`          | Fastify: remote MCP (`/mcp`) and REST (`/v1/*`) for agents             |
-| `apps/worker`       | Background jobs: ingest, lake publishing, erasure, hot-index pruning   |
-| `apps/bridge`       | `mm` CLI: local MCP server + Claude Code hooks for automatic capture   |
-| `packages/db`       | Postgres schema (SQL migrations), RLS, tenant-scoped client, job queue |
-| `packages/audit`    | Append-only, hash-chained audit log                                    |
-| `packages/privacy`  | PII and secret redaction, with a labelled test corpus                  |
-| `packages/ingest`   | Capture: input schemas, bronze storage, accept and process steps       |
-| `packages/mcp`      | MCP tool definitions shared by the remote server and the bridge        |
-| `packages/lake`     | Iceberg lake: outbox publisher, Athena queries, erasure, provisioning  |
-| `packages/github`   | GitHub App connector: auth, backfill, webhooks, PR sync and features   |
-| `packages/packs`    | Domain packs (YAML): categories, rules, features, metrics; categorizer |
-| `packages/backtest` | Backtest report from the lake; agreement with hand labels              |
-| `packages/llm`      | Claude on Bedrock: prompt registry, structured output, call log        |
-| `infra`             | AWS CDK: network, data (RDS, S3, KMS), lake (S3 Tables, Firehose), app |
-| `docs/adr`          | Architecture decisions                                                 |
+| Path                 | What                                                                   |
+| -------------------- | ---------------------------------------------------------------------- |
+| `apps/web`           | Next.js app: sign-in (WorkOS), onboarding, members, agents, privacy    |
+| `apps/api`           | Fastify: remote MCP (`/mcp`) and REST (`/v1/*`) for agents             |
+| `apps/worker`        | Background jobs: ingest, lake publishing, erasure, hot-index pruning   |
+| `apps/bridge`        | `mm` CLI: local MCP server + Claude Code hooks for automatic capture   |
+| `apps/gateway`       | WebSocket gateway: live presence and overlap alerts                    |
+| `packages/db`        | Postgres schema (SQL migrations), RLS, tenant-scoped client, job queue |
+| `packages/audit`     | Append-only, hash-chained audit log                                    |
+| `packages/privacy`   | PII and secret redaction, with a labelled test corpus                  |
+| `packages/ingest`    | Capture: input schemas, bronze storage, accept and process steps       |
+| `packages/mcp`       | MCP tool definitions shared by the remote server and the bridge        |
+| `packages/lake`      | Iceberg lake: outbox publisher, Athena queries, erasure, provisioning  |
+| `packages/github`    | GitHub App connector: auth, backfill, webhooks, PR sync and features   |
+| `packages/packs`     | Domain packs (YAML): categories, rules, features, metrics; categorizer |
+| `packages/backtest`  | Backtest report from the lake; agreement with hand labels              |
+| `packages/skills`    | Cohorts, skill extraction, the quality gate, dedupe, prompt evals      |
+| `packages/awareness` | Resource keys, overlap detection and alerts                            |
+| `packages/realtime`  | Gateway protocol: token signing, message schemas                       |
+| `packages/llm`       | Claude on Bedrock: prompt registry, structured output, call log        |
+| `infra`              | AWS CDK: network, data (RDS, S3, KMS), lake (S3 Tables, Firehose), app |
+| `docs/adr`           | Architecture decisions                                                 |
 
 ## Local setup
 
@@ -107,6 +111,13 @@ Set `MM_GATEWAY_SECRET` (shared by API and gateway) and `MM_GATEWAY_URL=ws://loc
 agents are told who else is working when that changes. See
 [ADR 0006](docs/adr/0006-presence-and-skill-drafts.md).
 
+### Overlap alerts
+
+When two people's agents change the same lines (or the same file, or announce similar work), both
+are alerted within seconds: in Claude Code through the bridge's hooks, elsewhere through
+`check_overlaps`. Agents say what they're starting with `announce_intent`. See
+[ADR 0007](docs/adr/0007-overlaps-and-skill-gate.md).
+
 ### How capture flows
 
 Agent → `log_task` (MCP) or a bridge hook → API checks the key and the member's opt-out, stores the
@@ -184,7 +195,13 @@ pnpm --filter @mm/skills draft <tenant-id> --train-end 2026-07-01
 
 Builds cohorts of successful and comparable unsuccessful work per category from the lake's
 training window, and asks Claude Sonnet (Bedrock) for one skill per cohort. Every step cites the
-PRs it came from. Drafts are stored for review.
+PRs it came from.
+
+Each draft then passes a gate before anyone reviews it: re-scan for secrets, personal data and
+injected instructions; a second model checks each step against the PRs it cites; a rubric score;
+and duplicates merge into the existing skill as a new version. Prompt changes are gated in CI:
+`pnpm --filter @mm/skills eval` runs the 30 golden cases against Claude, and `eval:lock` records a
+deliberate prompt change (with a version bump).
 
 ### Removing a member
 

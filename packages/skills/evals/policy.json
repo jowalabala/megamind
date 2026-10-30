@@ -1,0 +1,5 @@
+{
+  "require_live_results": false,
+  "min_pass_rate": 0.9,
+  "note": "Turn require_live_results on once CI can call Bedrock (OIDC role). Until then the gate checks prompt fingerprints and graders only."
+}

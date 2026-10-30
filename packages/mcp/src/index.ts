@@ -12,6 +12,7 @@ import { z } from "zod";
 import {
   formatHistory,
   searchHistoryInput,
+  UNTRUSTED_NOTE,
   searchHistoryOutput,
   type SearchHistoryInput,
   type SearchHistoryResult,
@@ -19,11 +20,29 @@ import {
 
 export * from "./history.ts";
 
-import { presenceEntry, type PresenceEntry } from "@mm/realtime";
+import { presenceEntry, type OverlapAlert, type PresenceEntry } from "@mm/realtime";
+import { announceIntentInput, type AnnounceIntentInput } from "@mm/ingest/schemas";
 
 export interface AwarenessHandlers {
   whatsHappening(): Promise<{ sessions: PresenceEntry[] }>;
+  /** Optional: only where the caller can name its session. */
+  announceIntent?(input: AnnounceIntentInput): Promise<CaptureResult>;
+  checkOverlaps?(input: { session_id?: string }): Promise<{ overlaps: OverlapAlert[] }>;
 }
+
+const overlapAlert = z.object({
+  id: z.string(),
+  kind: z.enum(["same_lines", "same_resource", "related_work"]),
+  severity: z.enum(["high", "medium", "low"]),
+  resource: z.string(),
+  with: z.string(),
+  your_lines: z.array(z.tuple([z.number(), z.number()])),
+  their_lines: z.array(z.tuple([z.number(), z.number()])),
+  shared_lines: z.array(z.tuple([z.number(), z.number()])),
+  similarity: z.number().nullable(),
+  first_seen: z.string(),
+  text: z.string(),
+});
 
 export function formatPresence(sessions: PresenceEntry[]): string {
   const others = sessions.filter((s) => !s.you);
@@ -58,12 +77,68 @@ export function registerAwarenessTools(server: McpServer, handlers: AwarenessHan
         };
       }),
   );
+
+  if (handlers.announceIntent) {
+    const announce = handlers.announceIntent;
+    server.registerTool(
+      "announce_intent",
+      {
+        title: "Say what you're about to work on",
+        description:
+          "Tell the team's agents what you're starting, and which files or resources you expect to touch. " +
+          "Call it at the start of a task (it replaces your previous intent). If someone else is working on " +
+          "the same thing you'll both get an alert. Resource keys: git:<host/owner/repo>:<path>[#L<a>-<b>].",
+        inputSchema: announceIntentInput,
+        outputSchema: z.object({
+          captured: z.boolean(),
+          intent_id: z.string().optional(),
+          reason: z.string().optional(),
+        }),
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+      },
+      (args) =>
+        guarded(async () => toResult(await announce(args as AnnounceIntentInput), "intent_id")),
+    );
+  }
+
+  if (handlers.checkOverlaps) {
+    const check = handlers.checkOverlaps;
+    server.registerTool(
+      "check_overlaps",
+      {
+        title: "Check for overlapping work",
+        description:
+          "Lists other agents' live sessions that are touching the same files (and lines) or doing similar " +
+          "work as yours. Same-lines overlaps mean a merge conflict is likely: coordinate before continuing.",
+        inputSchema: z.object({
+          session_id: z
+            .string()
+            .max(200)
+            .optional()
+            .describe("Your session id; default: all your live sessions."),
+        }),
+        outputSchema: z.object({ overlaps: z.array(overlapAlert) }),
+        annotations: { readOnlyHint: true, openWorldHint: false },
+      },
+      (args) =>
+        guarded(async () => {
+          const result = await check(args as { session_id?: string });
+          const text = result.overlaps.length
+            ? [
+                `${result.overlaps.length} overlap(s). ${UNTRUSTED_NOTE}`,
+                ...result.overlaps.map((o) => `- ${o.text}`),
+              ].join("\n")
+            : "No overlapping work right now.";
+          return { content: [{ type: "text", text }], structuredContent: result };
+        }),
+    );
+  }
 }
 
 export const SERVER_INFO = { name: "master-mind", version: "0.3.0" };
 
 export const SERVER_INSTRUCTIONS = `Master Mind is your team's shared memory of what work was done and what worked.
-Before starting non-trivial work, call search_history to see whether teammates have done something similar and how it turned out.
+Before starting non-trivial work, call search_history to see whether teammates have done something similar and how it turned out, and announce_intent to say what you're starting (you'll be alerted if someone else is working on the same thing).
 Call log_task when you finish a meaningful unit of work (a fix, a feature, a campaign email, an analysis), and report_outcome when you learn how it went.
 Personal data and secrets are removed before anything is stored. If the member has opted out, nothing is stored and the tools say so.`;
 

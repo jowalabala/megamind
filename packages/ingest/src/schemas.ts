@@ -93,3 +93,23 @@ export type LogTaskInput = z.infer<typeof logTaskInput>;
 export type ReportOutcomeInput = z.infer<typeof reportOutcomeInput>;
 export type ActionBatchInput = z.infer<typeof actionBatchInput>;
 export type SessionInput = z.infer<typeof sessionInput>;
+
+export const announceIntentInput = z.object({
+  description: z
+    .string()
+    .trim()
+    .min(1)
+    .max(2000)
+    .describe("One or two sentences: what you are about to work on, and why."),
+  resources: z
+    .array(z.string().min(1).max(600))
+    .max(100)
+    .default([])
+    .describe(
+      "What you expect to touch, as resource keys: git:<host/owner/repo>:<path>[#L<a>-<b>], hubspot:list:<id>, tag:<pack>:<name>.",
+    ),
+  session: sessionInput
+    .optional()
+    .describe("Your agent session. Required by the remote server; the local bridge fills it in."),
+});
+export type AnnounceIntentInput = z.infer<typeof announceIntentInput>;

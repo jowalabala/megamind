@@ -13,6 +13,7 @@
   "dependencies": {
     "@fastify/rate-limit": "^11.0.0",
     "@mm/audit": "workspace:*",
+    "@mm/awareness": "workspace:*",
     "@mm/db": "workspace:*",
     "@mm/github": "workspace:*",
     "@mm/ingest": "workspace:*",

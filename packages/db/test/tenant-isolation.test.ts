@@ -105,6 +105,27 @@ async function seedTenant(slug: string) {
         author_key, state, base_ref, head_ref_redacted, opened_at, gh_updated_at)
       VALUES (${t.tenantId}, ${prTask}, ${conn!.id}, 1, ${`${slug}/api`}, 1, 'github:42', 'open',
         'main', 'feature', now(), now())`);
+    const [s2] = await tx
+      .execute<{ id: string }>(
+        sql`
+      INSERT INTO agent_sessions (tenant_id, agent_identity_id, member_id, client_session_id)
+      VALUES (${t.tenantId}, ${agent.id}, ${member.id}, 'session-2') RETURNING id`,
+      )
+      .then((r) => r.rows);
+    const [a, b] = [session!.id, s2!.id].sort();
+    await tx.execute(sql`
+      INSERT INTO intents (id, tenant_id, session_id, member_id, description_redacted)
+      VALUES (gen_random_uuid(), ${t.tenantId}, ${session!.id}, ${member.id}, 'Seed intent')`);
+    await tx.execute(sql`
+      INSERT INTO session_overlaps (id, tenant_id, session_a, session_b, kind, severity, resource)
+      VALUES (gen_random_uuid(), ${t.tenantId}, ${a}, ${b}, 'same_resource', 'medium', 'git:x:y')`);
+    const skillId = crypto.randomUUID();
+    await tx.execute(sql`
+      INSERT INTO skills (id, tenant_id, pack, category, practice_key, title)
+      VALUES (${skillId}, ${t.tenantId}, 'engineering', 'bugfix', 'seed', 'Seed skill')`);
+    await tx.execute(sql`
+      INSERT INTO skill_versions (tenant_id, skill_id, version, title, body, evidence, gate)
+      VALUES (${t.tenantId}, ${skillId}, 1, 'Seed skill', '{}', '{}', '{}')`);
     await tx.execute(sql`
       INSERT INTO skill_drafts (id, tenant_id, pack, category, window_to, title, body, cohort, prompt_id, prompt_version)
       VALUES (gen_random_uuid(), ${t.tenantId}, 'engineering', 'bugfix', now(), 'Seed skill', '{}', '{}', 'skills.extract', 1)`);

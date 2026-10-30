@@ -64,6 +64,10 @@ export default async function PrivacyPage() {
               While your agent is working, teammates see that it&apos;s active (the tool and the
               repository; the branch only within your team), and nothing about how long or how much.
             </li>
+            <li>
+              If your agent and a teammate&apos;s change the same files at the same time, both of
+              you are told, so you can coordinate before a conflict.
+            </li>
             <li>Sessions marked private are never shown to anyone else.</li>
           </ul>
           <h2>What it never does</h2>

@@ -3,8 +3,12 @@
 import { createHash } from "node:crypto";
 import rateLimit from "@fastify/rate-limit";
 import { appendAuditEvent } from "@mm/audit";
+import { alertsFor, describeAlert } from "@mm/awareness";
 import {
+  agentSessions,
+  and,
   connectionRepo,
+  eq,
   historyRepo,
   presenceRepo,
   type AuthenticatedAgent,
@@ -15,9 +19,11 @@ import { signGatewayToken } from "@mm/realtime";
 import { backfillAddedRepos, installationOf, planWebhook, verifySignature } from "@mm/github";
 import {
   acceptActions,
+  acceptIntent,
   acceptOutcome,
   acceptTask,
   actionBatchInput,
+  announceIntentInput,
   idFromKey,
   IngestForbiddenError,
   logTaskInput,
@@ -77,6 +83,33 @@ async function whatsHappening(db: MasterMindDb, agent: AuthenticatedAgent) {
     presenceRepo.liveSessions(tx, agent.memberId),
   );
   return { sessions };
+}
+
+/** Overlaps for one of the agent's sessions (by its client id), or all its live ones. */
+async function checkOverlaps(
+  db: MasterMindDb,
+  agent: AuthenticatedAgent,
+  clientSessionId?: string,
+) {
+  requireScope(agent, "collab");
+  return db.withTenant(agent.tenantId, async (tx) => {
+    const sessions = await tx
+      .select({ id: agentSessions.id })
+      .from(agentSessions)
+      .where(
+        and(
+          eq(agentSessions.agentIdentityId, agent.agentId),
+          eq(agentSessions.status, "active"),
+          ...(clientSessionId ? [eq(agentSessions.clientSessionId, clientSessionId)] : []),
+        ),
+      );
+    const overlaps = [];
+    for (const s of sessions) {
+      for (const a of await alertsFor(tx, s.id, agent.memberId))
+        overlaps.push({ ...a, text: describeAlert(a) });
+    }
+    return { overlaps };
+  });
 }
 
 /** The local bridge identifies itself; everything else counts as remote MCP. */
@@ -174,12 +207,18 @@ export async function buildApp(deps: AppDeps) {
       logTask: (input) => forbidden(() => acceptTask(deps, agent, input, sourceOf(req))),
       reportOutcome: (input) => forbidden(() => acceptOutcome(deps, agent, input, sourceOf(req))),
     });
+    const userError = (err: unknown) => {
+      if (err instanceof IngestForbiddenError) throw new ToolUserError(err.message);
+      throw err;
+    };
     registerAwarenessTools(server, {
-      whatsHappening: () =>
-        whatsHappening(deps.db, agent).catch((err) => {
-          if (err instanceof IngestForbiddenError) throw new ToolUserError(err.message);
-          throw err;
+      whatsHappening: () => whatsHappening(deps.db, agent).catch(userError),
+      announceIntent: (input) =>
+        forbidden(async () => {
+          requireScope(agent, "collab");
+          return acceptIntent(deps, agent, input, sourceOf(req));
         }),
+      checkOverlaps: (input) => checkOverlaps(deps.db, agent, input.session_id).catch(userError),
     });
     registerHistoryTools(server, {
       searchHistory: (input) =>
@@ -227,6 +266,24 @@ export async function buildApp(deps: AppDeps) {
   app.get("/v1/presence", { preHandler: requireAgent }, async (req) =>
     whatsHappening(deps.db, req.agent!),
   );
+  app.post("/v1/intents", { preHandler: requireAgent }, async (req, reply) => {
+    requireScope(req.agent!, "collab");
+    const result = await acceptIntent(
+      deps,
+      req.agent!,
+      announceIntentInput.parse(req.body),
+      sourceOf(req),
+    );
+    return reply.code(result.captured ? 202 : 200).send(result);
+  });
+  app.get("/v1/overlaps", { preHandler: requireAgent }, async (req) => {
+    const q = req.query as { session_id?: string };
+    return checkOverlaps(
+      deps.db,
+      req.agent!,
+      typeof q.session_id === "string" ? q.session_id : undefined,
+    );
+  });
   // A 5-minute token for the real-time gateway, so agent keys never go to the WebSocket.
   app.post("/v1/gateway/token", { preHandler: requireAgent }, async (req, reply) => {
     const agent = req.agent!;

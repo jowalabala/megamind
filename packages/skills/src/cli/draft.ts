@@ -6,6 +6,7 @@ import { localLake, type LakeAdmin } from "@mm/lake";
 import { athenaLake } from "@mm/lake/aws";
 import { bedrockTransport, createLlm, dbCallLogger, modelConfigFromEnv } from "@mm/llm";
 import { draftSkills } from "../draft.ts";
+import { gateDraft } from "../gate.ts";
 
 const args = process.argv.slice(2);
 const tenantId = args[0];
@@ -38,8 +39,17 @@ const llm = createLlm({
 });
 try {
   for (const o of await draftSkills({ db, lake, llm }, tenantId, { trainEnd })) {
+    let gate = "";
+    if (o.result === "drafted" && o.draftId) {
+      // Re-scan, verify each step against its evidence, score, then merge or create the skill.
+      const g = await gateDraft({ db, llm }, tenantId, o.draftId);
+      gate =
+        g.status === "accepted"
+          ? ` -> skill (${g.relation}, v${g.version})`
+          : ` -> rejected (${g.reason})`;
+    }
     console.log(
-      `${o.pack}/${o.category}: ${o.result}${o.title ? ` - "${o.title}"` : ""} (${o.successes} successes vs ${o.failures}; ${o.droppedCitations} bad citations removed)`,
+      `${o.pack}/${o.category}: ${o.result}${o.title ? ` - "${o.title}"` : ""}${gate} (${o.successes} successes vs ${o.failures}; ${o.droppedCitations} bad citations removed)`,
     );
   }
 } finally {

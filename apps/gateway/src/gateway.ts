@@ -16,6 +16,7 @@ import {
   sql,
   type MasterMindDb,
 } from "@mm/db";
+import { ALERT_CHANNEL, alertsFor, describeAlert, markDelivered } from "@mm/awareness";
 import { listen, type Listener } from "@mm/db/notify";
 import type { RedactorFor } from "@mm/ingest";
 import {
@@ -102,6 +103,22 @@ export async function createGateway(options: GatewayOptions) {
     });
   }
 
+  /** Sends each viewer in a tenant the overlap alerts it hasn't had yet, then marks them sent. */
+  async function pushAlerts(tenantId: string) {
+    for (const c of byTenant(tenantId)) {
+      await options.db.withTenant(tenantId, async (tx) => {
+        const alerts = await alertsFor(tx, c.sessionId!, c.claims.memberId, { undelivered: true });
+        if (alerts.length === 0 || c.ws.readyState !== WebSocket.OPEN) return;
+        send(c, { type: "alert", alerts: alerts.map((a) => ({ ...a, text: describeAlert(a) })) });
+        await markDelivered(
+          tx,
+          c.sessionId!,
+          alerts.map((a) => a.id),
+        );
+      });
+    }
+  }
+
   const notify = (tenantId: string) =>
     options.db.withTenant(tenantId, (tx) =>
       tx.execute(sql`SELECT pg_notify(${CHANNEL}, ${tenantId})`),
@@ -122,6 +139,25 @@ export async function createGateway(options: GatewayOptions) {
       }
       void pushTenant(payload).catch((e: Error) =>
         log("gateway.push_error", { message: e.message }),
+      );
+    },
+  );
+
+  const alertListener: Listener = await listen(
+    {
+      connectionString: options.listenUrl,
+      ssl: options.ssl,
+      onError: (e) => log("gateway.listen_error", { message: e.message }),
+    },
+    ALERT_CHANNEL,
+    (payload) => {
+      try {
+        assertTenantId(payload);
+      } catch {
+        return;
+      }
+      void pushAlerts(payload).catch((e: Error) =>
+        log("gateway.alert_error", { message: e.message }),
       );
     },
   );
@@ -202,6 +238,8 @@ export async function createGateway(options: GatewayOptions) {
       c.lastHeartbeatWrite = now;
       send(c, { type: "welcome", session_id: result.id });
       await pushTenant(tenantId);
+      // Anything that came up while this session was disconnected.
+      await pushAlerts(tenantId);
       return;
     }
     if (!c.sessionId) return c.ws.close(CLOSE.badMessage, "hello first");
@@ -281,6 +319,7 @@ export async function createGateway(options: GatewayOptions) {
       clearInterval(sweep);
       for (const c of conns) c.ws.close(1001, "shutting down");
       await listener.close();
+      await alertListener.close();
       await new Promise<void>((r) => wss.close(() => r()));
       await new Promise<void>((r) => server.close(() => r()));
     },
