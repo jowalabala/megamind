@@ -1,0 +1,8 @@
+pnpm-lock.yaml
+**/.next
+**/cdk.out
+**/dist
+docs/PLAN.md
+
+**/next-env.d.ts
+infra/cdk.out

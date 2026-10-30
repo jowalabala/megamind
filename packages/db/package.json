@@ -1,0 +1,26 @@
+{
+  "name": "@mm/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts",
+    "./migrate": "./src/migrate.ts"
+  },
+  "scripts": {
+    "migrate": "tsx src/cli/migrate.ts",
+    "seed": "tsx src/cli/seed.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "drizzle-orm": "~0.44.7",
+    "pg": "^8.16.0"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "^11.14.0",
+    "@types/pg": "^8.15.0",
+    "tsx": "^4.20.0"
+  }
+}

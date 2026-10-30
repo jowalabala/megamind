@@ -1,0 +1,38 @@
+{
+  "name": "master-mind",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.34.9",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "db:up": "docker compose up -d postgres",
+    "db:migrate": "pnpm --filter @mm/db migrate",
+    "db:seed": "pnpm --filter @mm/db seed"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@types/node": "^22.20.0",
+    "eslint": "^9.39.0",
+    "prettier": "^3.6.0",
+    "turbo": "^2.5.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.46.0",
+    "vitest": "^3.2.4"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "cpu-features",
+      "ssh2",
+      "protobufjs"
+    ]
+  }
+}
