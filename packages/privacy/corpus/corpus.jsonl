@@ -1,0 +1,113 @@
+{"id": "sec-env-01", "text": "AWS_ACCESS_KEY_ID={{aws_key}}\nAWS_SECRET_ACCESS_KEY={{aws_secret}}\nAWS_REGION=us-east-1", "expect": [{"label": "aws_access_key_id", "value": "{{aws_key}}"}, {"label": "keyword_secret", "value": "{{aws_secret}}"}], "keep": ["AWS_REGION=us-east-1"]}
+{"id": "sec-env-02", "text": "export GITHUB_TOKEN={{github_token}} && gh pr list", "expect": [{"label": "github_token", "value": "{{github_token}}"}], "keep": ["gh pr list"]}
+{"id": "sec-env-03", "text": "GH_PAT: {{github_pat}}", "expect": [{"label": "github_token", "value": "{{github_pat}}"}]}
+{"id": "sec-env-04", "text": "OPENAI_API_KEY=\"{{openai_key}}\"", "expect": [{"label": "openai_key", "value": "{{openai_key}}"}]}
+{"id": "sec-env-05", "text": "ANTHROPIC_API_KEY={{anthropic_key}} pnpm smoke", "expect": [{"label": "anthropic_key", "value": "{{anthropic_key}}"}], "keep": ["pnpm smoke"]}
+{"id": "sec-code-01", "text": "const stripe = new Stripe(\"{{stripe_key}}\", { apiVersion: \"2025-01-01\" });", "expect": [{"label": "stripe_key", "value": "{{stripe_key}}"}], "keep": ["apiVersion"]}
+{"id": "sec-code-02", "text": "client = WebClient(token=\"{{slack_token}}\")", "expect": [{"label": "slack_token", "value": "{{slack_token}}"}], "keep": ["WebClient"]}
+{"id": "sec-code-03", "text": "fetch(\"{{slack_webhook}}\", { method: \"POST\", body })", "expect": [{"label": "slack_webhook", "value": "{{slack_webhook}}"}], "keep": ["method: \"POST\""]}
+{"id": "sec-code-04", "text": "const maps = loadMaps({ key: \"{{google_key}}\" })", "expect": [{"label": "google_api_key", "value": "{{google_key}}"}], "keep": ["loadMaps"]}
+{"id": "sec-code-05", "text": "//registry.npmjs.org/:_authToken={{npm_token}}", "expect": [{"label": "npm_token", "value": "{{npm_token}}"}], "keep": ["registry.npmjs.org"]}
+{"id": "sec-code-06", "text": "hubspot.client.setAccessToken('{{hubspot_token}}')", "expect": [{"label": "hubspot_token", "value": "{{hubspot_token}}"}], "keep": ["setAccessToken"]}
+{"id": "sec-code-07", "text": "sgMail.setApiKey(\"{{sendgrid_key}}\");", "expect": [{"label": "sendgrid_key", "value": "{{sendgrid_key}}"}]}
+{"id": "sec-code-08", "text": "TWILIO_API_KEY={{twilio_key}}", "expect": [{"label": "twilio_key", "value": "{{twilio_key}}"}]}
+{"id": "sec-code-09", "text": "Authorization: Bearer {{jwt}}", "expect": [{"label": "jwt", "value": "{{jwt}}"}], "keep": ["Authorization: Bearer"]}
+{"id": "sec-code-10", "text": "curl -H 'Authorization: Bearer {{bearer}}' https://api.internal.test/v1/me", "expect": [{"label": "authorization_header", "value": "{{bearer}}"}], "keep": ["https://api.internal.test/v1/me"]}
+{"id": "sec-code-11", "text": "DATABASE_URL=postgres://app_user:{{password}}@db.internal:5432/app", "expect": [{"label": "url_password", "value": "{{password}}"}], "keep": ["db.internal:5432/app", "app_user"]}
+{"id": "sec-code-12", "text": "redis://default:{{password:2}}@cache.prod.internal:6379", "expect": [{"label": "url_password", "value": "{{password:2}}"}], "keep": ["cache.prod.internal:6379"]}
+{"id": "sec-code-13", "text": "{{private_key}}", "expect": [{"label": "private_key", "value": "{{private_key}}"}]}
+{"id": "sec-code-14", "text": "Key file contents:\n{{private_key}}\nend of file", "expect": [{"label": "private_key", "value": "{{private_key}}"}], "keep": ["Key file contents:", "end of file"]}
+{"id": "sec-code-15", "text": "MM_AGENT_KEY={{mm_key}}", "expect": [{"label": "mastermind_key", "value": "{{mm_key}}"}]}
+{"id": "sec-code-16", "text": "gitlab: {{gitlab_token}}", "expect": [{"label": "gitlab_token", "value": "{{gitlab_token}}"}]}
+{"id": "sec-code-17", "text": "DefaultEndpointsProtocol=https;AccountName=acmeblobs;AccountKey={{azure_key}};EndpointSuffix=core.windows.net", "expect": [{"label": "azure_storage_key", "value": "{{azure_key}}"}], "keep": ["AccountName=acmeblobs"]}
+{"id": "sec-cfg-01", "text": "db:\n  host: db.internal\n  password: \"{{password}}\"\n  pool: 10", "expect": [{"label": "keyword_secret", "value": "{{password}}"}], "keep": ["host: db.internal", "pool: 10"]}
+{"id": "sec-cfg-02", "text": "{\"client_id\": \"web-app\", \"client_secret\": \"{{password:3}}\"}", "expect": [{"label": "keyword_secret", "value": "{{password:3}}"}], "keep": ["web-app"]}
+{"id": "sec-cfg-03", "text": "SMTP_PASSWORD={{password:4}}", "expect": [{"label": "keyword_secret", "value": "{{password:4}}"}]}
+{"id": "sec-cfg-04", "text": "api_key: {{password:5}}", "expect": [{"label": "keyword_secret", "value": "{{password:5}}"}]}
+{"id": "sec-cfg-05", "text": "settings.SECRET_KEY = '{{password:6}}'", "expect": [{"label": "keyword_secret", "value": "{{password:6}}"}], "keep": ["settings."]}
+{"id": "sec-cfg-06", "text": "\"accessToken\":\"{{bearer:2}}\",\"expiresIn\":3600", "expect": [{"label": "keyword_secret", "value": "{{bearer:2}}"}], "keep": ["\"expiresIn\":3600"]}
+{"id": "sec-log-01", "text": "2026-10-28T10:15:02Z ERROR auth failed for key {{github_token}} (rate limited)", "expect": [{"label": "github_token", "value": "{{github_token}}"}], "keep": ["2026-10-28T10:15:02Z", "rate limited"]}
+{"id": "sec-log-02", "text": "Retrying request with headers {\"x-api-key\": \"{{anthropic_key}}\"}", "expect": [{"label": "anthropic_key", "value": "{{anthropic_key}}"}], "keep": ["Retrying request"]}
+{"id": "sec-log-03", "text": "set-cookie: session={{jwt}}; Path=/; HttpOnly", "expect": [{"label": "jwt", "value": "{{jwt}}"}], "keep": ["Path=/; HttpOnly"]}
+{"id": "sec-agent-01", "text": "Ran `aws sts get-caller-identity` with AKIA key {{aws_key}} — success", "expect": [{"label": "aws_access_key_id", "value": "{{aws_key}}"}], "keep": ["aws sts get-caller-identity"]}
+{"id": "sec-agent-02", "text": "Edited .env: added STRIPE_SECRET_KEY={{stripe_key}} and restarted the server", "expect": [{"label": "stripe_key", "value": "{{stripe_key}}"}], "keep": ["restarted the server"]}
+{"id": "sec-agent-03", "text": "Tool call: bash(\"psql postgresql://admin:{{password}}@10.0.3.12/billing -c 'select 1'\")", "expect": [{"label": "url_password", "value": "{{password}}"}], "keep": ["select 1"]}
+{"id": "sec-agent-04", "text": "I'll use the token {{openai_key}} to call the embeddings endpoint.", "expect": [{"label": "openai_key", "value": "{{openai_key}}"}], "keep": ["embeddings endpoint"]}
+{"id": "sec-agent-05", "text": "Found credentials in config/prod.yml: token: {{bearer}}", "expect": [{"label": "keyword_secret", "value": "{{bearer}}"}], "keep": ["config/prod.yml"]}
+{"id": "sec-agent-06", "text": "Generated JWT for test user: {{jwt}}", "expect": [{"label": "jwt", "value": "{{jwt}}"}]}
+{"id": "sec-agent-07", "text": "PRIVATE KEY pasted by user:\n{{private_key_open}}", "expect": [{"label": "private_key", "value": "{{private_key_open}}"}], "keep": ["pasted by user"]}
+{"id": "sec-chat-01", "text": "hey can you rotate this? {{slack_token}} it was posted in #general", "expect": [{"label": "slack_token", "value": "{{slack_token}}"}], "keep": ["#general"]}
+{"id": "sec-chat-02", "text": "password is {{password:7}} for the staging box", "expect": [{"label": "keyword_secret", "value": "{{password:7}}"}], "keep": ["staging box"], "note": "Known gap: a password written in prose ('password is X') has no assignment to anchor on."}
+{"id": "sec-chat-03", "text": "pwd={{password:8}}", "expect": [{"label": "keyword_secret", "value": "{{password:8}}"}]}
+{"id": "pii-email-01", "text": "Reply from jane.doe@example.com: interested, send pricing", "expect": [{"label": "email", "value": "jane.doe@example.com"}], "keep": ["interested, send pricing"]}
+{"id": "pii-email-02", "text": "CC: Mark <mark.t+billing@globex-corp.io>; BCC: ops@acme.test", "expect": [{"label": "email", "value": "mark.t+billing@globex-corp.io"}, {"label": "email", "value": "ops@acme.test"}]}
+{"id": "pii-email-03", "text": "Sequence step 2 sent to 412 contacts, bounced: s.ochoa@contoso.co.uk", "expect": [{"label": "email", "value": "s.ochoa@contoso.co.uk"}], "keep": ["412 contacts"]}
+{"id": "pii-email-04", "text": "git config user.email \"ryan_k@users.noreply.github.com\"", "expect": [{"label": "email", "value": "ryan_k@users.noreply.github.com"}], "keep": ["git config user.email"]}
+{"id": "pii-email-05", "text": "Invoice question from AP@VENDOR-SUPPLY.COM about PO-88213", "expect": [{"label": "email", "value": "AP@VENDOR-SUPPLY.COM"}], "keep": ["PO-88213"]}
+{"id": "pii-phone-01", "text": "Call me at +1 (415) 555-0134 after 3pm", "expect": [{"label": "phone", "value": "+1 (415) 555-0134"}], "keep": ["after 3pm"]}
+{"id": "pii-phone-02", "text": "Mobile: 415-555-0199", "expect": [{"label": "phone", "value": "415-555-0199"}]}
+{"id": "pii-phone-03", "text": "UK office 020 7946 0958, ask for reception", "expect": [{"label": "phone", "value": "020 7946 0958"}], "keep": ["ask for reception"]}
+{"id": "pii-phone-04", "text": "whatsapp +447700900123", "expect": [{"label": "phone", "value": "+447700900123"}]}
+{"id": "pii-phone-05", "text": "Candidate phone: (212) 555-7788.", "expect": [{"label": "phone", "value": "(212) 555-7788"}]}
+{"id": "pii-phone-06", "text": "Tel. +49 30 901820 34", "expect": [{"label": "phone", "value": "+49 30 901820 34"}]}
+{"id": "pii-phone-07", "text": "reach her on 054-555-1234 (Israel)", "expect": [{"label": "phone", "value": "054-555-1234"}], "keep": ["(Israel)"]}
+{"id": "pii-phone-08", "text": "Fax: 1.800.555.0175", "expect": [{"label": "phone", "value": "1.800.555.0175"}]}
+{"id": "pii-card-01", "text": "Customer card 4111 1111 1111 1111 exp 12/29 was declined", "expect": [{"label": "card", "value": "4111 1111 1111 1111"}], "keep": ["was declined"]}
+{"id": "pii-card-02", "text": "Refund to 5555-5555-5555-4444 processed", "expect": [{"label": "card", "value": "5555-5555-5555-4444"}], "keep": ["processed"]}
+{"id": "pii-card-03", "text": "amex 378282246310005 on file", "expect": [{"label": "card", "value": "378282246310005"}], "keep": ["on file"]}
+{"id": "pii-card-04", "text": "card=6011111111111117", "expect": [{"label": "card", "value": "6011111111111117"}]}
+{"id": "pii-ssn-01", "text": "Employee SSN 123-45-6789 needed for payroll setup", "expect": [{"label": "ssn", "value": "123-45-6789"}], "keep": ["payroll setup"]}
+{"id": "pii-ssn-02", "text": "W-4 for new hire, SSN: 078-05-1121", "expect": [{"label": "ssn", "value": "078-05-1121"}], "keep": ["W-4"]}
+{"id": "pii-iban-01", "text": "Wire to IBAN GB82 WEST 1234 5698 7654 32 by Friday", "expect": [{"label": "iban", "value": "GB82 WEST 1234 5698 7654 32"}], "keep": ["by Friday"]}
+{"id": "pii-iban-02", "text": "Supplier account DE89370400440532013000 updated", "expect": [{"label": "iban", "value": "DE89370400440532013000"}], "keep": ["updated"]}
+{"id": "pii-ip-01", "text": "Login from 203.0.113.45 flagged as unusual", "expect": [{"label": "ip", "value": "203.0.113.45"}], "keep": ["flagged as unusual"]}
+{"id": "pii-ip-02", "text": "X-Forwarded-For: 198.51.100.7, 10.0.0.2", "expect": [{"label": "ip", "value": "198.51.100.7"}, {"label": "ip", "value": "10.0.0.2"}]}
+{"id": "pii-mixed-01", "text": "Lead: Sam Patel, sam.patel@initech.test, +1 646 555 0101, wants a demo", "expect": [{"label": "email", "value": "sam.patel@initech.test"}, {"label": "phone", "value": "+1 646 555 0101"}, {"label": "name", "value": "Sam Patel"}], "keep": ["wants a demo"], "requires": "comprehend"}
+{"id": "pii-mixed-02", "text": "Offer letter for Maria Gonzalez, 1600 Amphitheatre Pkwy, Mountain View, CA 94043, salary band L4", "expect": [{"label": "name", "value": "Maria Gonzalez"}, {"label": "address", "value": "1600 Amphitheatre Pkwy, Mountain View, CA 94043"}], "keep": ["salary band L4"], "requires": "comprehend"}
+{"id": "pii-mixed-03", "text": "Expense report from tom.h@acme.test, card ending 1111 (full: 4111111111111111)", "expect": [{"label": "email", "value": "tom.h@acme.test"}, {"label": "card", "value": "4111111111111111"}], "keep": ["card ending 1111"]}
+{"id": "pii-mixed-04", "text": "Payroll correction: SSN 219-09-9999, direct deposit IBAN FR1420041010050500013M02606", "expect": [{"label": "ssn", "value": "219-09-9999"}, {"label": "iban", "value": "FR1420041010050500013M02606"}], "keep": ["Payroll correction"]}
+{"id": "dir-01", "text": "Dana Levi reviewed the PR and asked Lior Ben-David to split it", "expect": [{"label": "person", "value": "Dana Levi"}, {"label": "person", "value": "Lior Ben-David"}], "keep": ["reviewed the PR"]}
+{"id": "dir-02", "text": "Assigned to @danalevi; cc @lior-bd", "expect": [{"label": "person", "value": "@danalevi"}, {"label": "person", "value": "@lior-bd"}], "keep": ["Assigned to"]}
+{"id": "dir-03", "text": "From: priya.raman@acme.test\nTo: lior@acme.test\nSubject: Q3 pipeline", "expect": [{"label": "person", "value": "priya.raman@acme.test"}, {"label": "person", "value": "lior@acme.test"}], "keep": ["Subject: Q3 pipeline"]}
+{"id": "dir-04", "text": "DANA LEVI approved the budget", "expect": [{"label": "person", "value": "DANA LEVI"}], "keep": ["approved the budget"]}
+{"id": "dir-05", "text": "Priya   Raman and Dana\nLevi paired on the migration", "expect": [{"label": "person", "value": "Priya   Raman"}, {"label": "person", "value": "Dana\nLevi"}], "keep": ["paired on the migration"]}
+{"id": "neg-01", "text": "Merged 3f2a9c1e7b4d5a6f8e9d0c1b2a3f4e5d6c7b8a9f into main", "expect": [], "keep": ["Merged 3f2a9c1e7b4d5a6f8e9d0c1b2a3f4e5d6c7b8a9f into main"]}
+{"id": "neg-02", "text": "request id 6f1c2b8e-3d4a-4f5b-9c6d-7e8f9a0b1c2d", "expect": [], "keep": ["request id 6f1c2b8e-3d4a-4f5b-9c6d-7e8f9a0b1c2d"]}
+{"id": "neg-03", "text": "bumped next from 15.5.28 to 15.5.29 and node to 22.20.0", "expect": [], "keep": ["bumped next from 15.5.28 to 15.5.29 and node to 22.20.0"]}
+{"id": "neg-04", "text": "deployed at 2026-10-28T14:03:11.512Z (build 1730124191512)", "expect": [], "keep": ["deployed at 2026-10-28T14:03:11.512Z (build 1730124191512)"]}
+{"id": "neg-05", "text": "Order #100045, total $1,249.00, qty 12", "expect": [], "keep": ["Order #100045, total $1,249.00, qty 12"]}
+{"id": "neg-06", "text": "src/billing/invoice.ts#L40-L90", "expect": [], "keep": ["src/billing/invoice.ts#L40-L90"]}
+{"id": "neg-07", "text": "Retina assets: logo@2x.png and icon@3x.svg", "expect": [], "keep": ["Retina assets: logo@2x.png and icon@3x.svg"]}
+{"id": "neg-08", "text": "import { z } from \"zod\"; import type { Foo } from \"@mm/db\";", "expect": [], "keep": ["import { z } from \"zod\"; import type { Foo } from \"@mm/db\";"]}
+{"id": "neg-09", "text": "const token = getToken(); const password: string = input.password;", "expect": [], "keep": ["const token = getToken(); const password: string = input.password;"]}
+{"id": "neg-10", "text": "max_tokens: 1024, input_tokens: 51234, output_tokens: 800", "expect": [], "keep": ["max_tokens: 1024, input_tokens: 51234, output_tokens: 800"]}
+{"id": "neg-11", "text": "password = process.env.DB_PASSWORD", "expect": [], "keep": ["password = process.env.DB_PASSWORD"]}
+{"id": "neg-12", "text": "secret: ${{ secrets.NPM_TOKEN }}", "expect": [], "keep": ["secret: ${{ secrets.NPM_TOKEN }}"]}
+{"id": "neg-13", "text": "api_key: <your-key-here>", "expect": [], "keep": ["api_key: <your-key-here>"]}
+{"id": "neg-14", "text": "Listening on 127.0.0.1:3000 and 0.0.0.0:8080", "expect": [], "keep": ["Listening on 127.0.0.1:3000 and 0.0.0.0:8080"]}
+{"id": "neg-15", "text": "Response time p95 = 412.5ms over 10000 requests", "expect": [], "keep": ["Response time p95 = 412.5ms over 10000 requests"]}
+{"id": "neg-16", "text": "Ticket ENG-4821 blocked by ENG-4799", "expect": [], "keep": ["Ticket ENG-4821 blocked by ENG-4799"]}
+{"id": "neg-17", "text": "Q3 revenue grew 18% to $4.2M; churn 2.1%", "expect": [], "keep": ["Q3 revenue grew 18% to $4.2M; churn 2.1%"]}
+{"id": "neg-18", "text": "Meeting moved to 10/30/2026 at 14:30", "expect": [], "keep": ["Meeting moved to 10/30/2026 at 14:30"]}
+{"id": "neg-19", "text": "Coordinates 40.7128, -74.0060", "expect": [], "keep": ["Coordinates 40.7128, -74.0060"]}
+{"id": "neg-20", "text": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", "expect": [], "keep": ["sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"]}
+{"id": "neg-21", "text": "PR #482: Refactor computeTotal to support proration", "expect": [], "keep": ["PR #482: Refactor computeTotal to support proration"]}
+{"id": "neg-22", "text": "the tokenizer splits on whitespace; token count was 3", "expect": [], "keep": ["the tokenizer splits on whitespace; token count was 3"]}
+{"id": "neg-23", "text": "Version 2.4.10 released; see CHANGELOG.md", "expect": [], "keep": ["Version 2.4.10 released; see CHANGELOG.md"]}
+{"id": "neg-24", "text": "Campaign CTR 3.4%, CPC $1.12, 12,450 impressions", "expect": [], "keep": ["Campaign CTR 3.4%, CPC $1.12, 12,450 impressions"]}
+{"id": "neg-25", "text": "Use the Bearer scheme in the Authorization header", "expect": [], "keep": ["Use the Bearer scheme in the Authorization header"]}
+{"id": "neg-26", "text": "phone_number column added to contacts table (nullable)", "expect": [], "keep": ["phone_number column added to contacts table (nullable)"]}
+{"id": "neg-27", "text": "Employee count 1,204 across 14 offices", "expect": [], "keep": ["Employee count 1,204 across 14 offices"]}
+{"id": "neg-28", "text": "matrix shape (512, 1024, 3)", "expect": [], "keep": ["matrix shape (512, 1024, 3)"]}
+{"id": "neg-29", "text": "npm install @aws-sdk/client-s3@3.1160.0", "expect": [], "keep": ["npm install @aws-sdk/client-s3@3.1160.0"]}
+{"id": "neg-30", "text": "UUID v4 regex: ^[0-9a-f]{8}-[0-9a-f]{4}-4", "expect": [], "keep": ["UUID v4 regex: ^[0-9a-f]{8}-[0-9a-f]{4}-4"]}
+{"id": "neg-31", "text": "Account 12345 credited 500.00 USD", "expect": [], "keep": ["Account 12345 credited 500.00 USD"]}
+{"id": "neg-32", "text": "Commit by github-actions[bot] on 2026-10-29", "expect": [], "keep": ["Commit by github-actions[bot] on 2026-10-29"]}
+{"id": "neg-33", "text": "Run vitest with --reporter=verbose --testTimeout=60000", "expect": [], "keep": ["Run vitest with --reporter=verbose --testTimeout=60000"]}
+{"id": "neg-34", "text": "SLA 99.95% for tier-1 customers", "expect": [], "keep": ["SLA 99.95% for tier-1 customers"]}
+{"id": "neg-35", "text": "Dana reviewed it", "expect": [], "keep": ["Dana reviewed it"]}
+{"id": "neg-36", "text": "IBAN validation added for GB and DE formats", "expect": [], "keep": ["IBAN validation added for GB and DE formats"]}
+{"id": "neg-37", "text": "AKIA prefix means a long-term AWS key", "expect": [], "keep": ["AKIA prefix means a long-term AWS key"]}
+{"id": "neg-38", "text": "ghp_ tokens are classic GitHub PATs", "expect": [], "keep": ["ghp_ tokens are classic GitHub PATs"]}
+{"id": "neg-39", "text": "Lines 1205-1290 changed in 3 files", "expect": [], "keep": ["Lines 1205-1290 changed in 3 files"]}
+{"id": "neg-40", "text": "pagination: page=2&per_page=100", "expect": [], "keep": ["pagination: page=2&per_page=100"]}

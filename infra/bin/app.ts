@@ -20,6 +20,7 @@ new AppStack(app, `${prefix}-App`, cfg, {
   db: data.db,
   dbSecurityGroup: data.dbSecurityGroup,
   appDbSecret: data.appDbSecret,
+  bronzeBucket: data.bronzeBucket,
 });
 
 Tags.of(app).add("project", "master-mind");

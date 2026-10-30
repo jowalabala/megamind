@@ -1,5 +1,5 @@
 import { appendAuditEvent } from "@mm/audit";
-import { members, tenants, eq } from "@mm/db";
+import { eq, memberRepo, tenants } from "@mm/db";
 import { withAuth } from "@workos-inc/authkit-nextjs";
 import { redirect } from "next/navigation";
 import { db } from "./db";
@@ -16,7 +16,7 @@ export async function requireMemberContext() {
 
   return db().withTenant(tenantId, async (tx) => {
     const displayName = [user.firstName, user.lastName].filter(Boolean).join(" ") || null;
-    const { member, created } = await members.ensureMember(tx, tenantId, {
+    const { member, created } = await memberRepo.ensureMember(tx, tenantId, {
       workosUserId: user.id,
       email: user.email,
       displayName,

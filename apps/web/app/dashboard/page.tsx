@@ -1,4 +1,4 @@
-import { auditEvents, desc, members, teams } from "@mm/db";
+import { auditEvents, desc, memberRepo, teams } from "@mm/db";
 import { requireMemberContext } from "../../lib/context";
 import { db } from "../../lib/db";
 import { TopBar } from "../top-bar";
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export default async function Dashboard() {
   const ctx = await requireMemberContext();
   const data = await db().withTenant(ctx.tenantId, async (tx) => {
-    const memberList = await members.listMembers(tx);
+    const memberList = await memberRepo.listMembers(tx);
     const teamList = await tx.select().from(teams);
     const recent =
       ctx.member.role === "admin"

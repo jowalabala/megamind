@@ -27,8 +27,12 @@ jobs:
       - run: pnpm lint
       - run: pnpm format:check
       - run: pnpm typecheck
-      # Includes the cross-tenant isolation suite (Testcontainers Postgres).
+      # Includes the cross-tenant isolation suite, the redaction corpus and the
+      # MCP end-to-end test (Testcontainers Postgres).
       - run: pnpm test
       - run: pnpm --filter @mm/web build
+      - run: pnpm --filter @mm/api build && pnpm --filter @mm/worker build
+      - name: Services image builds
+        run: docker build -f apps/api/Dockerfile -t mastermind-services:ci .
       - name: CDK synth (account-agnostic)
         run: pnpm --filter @mm/infra synth

@@ -1,5 +1,6 @@
 export {
   assertTenantId,
+  type AuthenticatedAgent,
   createDb,
   TenantContextError,
   type CreateDbOptions,
@@ -8,6 +9,8 @@ export {
   type ProvisionTenantInput,
   type TenantTx,
 } from "./client.ts";
-export * as members from "./repos/members.ts";
+export { databaseSslFromEnv, databaseUrlFromEnv } from "./env.ts";
+export * as agentRepo from "./repos/agents.ts";
+export * as memberRepo from "./repos/members.ts";
 export * from "./schema.ts";
-export { and, asc, desc, eq, sql } from "drizzle-orm";
+export { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";

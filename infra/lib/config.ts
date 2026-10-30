@@ -9,6 +9,8 @@ export interface StageConfig {
   /** Production data is never destroyed with the stack. */
   retainData: boolean;
   webDesiredCount: number;
+  apiDesiredCount: number;
+  workerDesiredCount: number;
 }
 
 export const STAGES: Record<Stage, StageConfig> = {
@@ -20,6 +22,8 @@ export const STAGES: Record<Stage, StageConfig> = {
     dbBackupDays: 7,
     retainData: false,
     webDesiredCount: 1,
+    apiDesiredCount: 1,
+    workerDesiredCount: 1,
   },
   prod: {
     stage: "prod",
@@ -29,6 +33,8 @@ export const STAGES: Record<Stage, StageConfig> = {
     dbBackupDays: 30,
     retainData: true,
     webDesiredCount: 2,
+    apiDesiredCount: 2,
+    workerDesiredCount: 1,
   },
 };
 

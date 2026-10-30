@@ -63,3 +63,12 @@ export async function memberIsAdmin(tx: TenantTx, memberId: string): Promise<boo
     .limit(1);
   return rows.length > 0;
 }
+
+export async function setCaptureOptOut(tx: TenantTx, memberId: string, optOut: boolean) {
+  const [m] = await tx
+    .update(members)
+    .set({ captureOptOut: optOut })
+    .where(eq(members.id, memberId))
+    .returning();
+  return m ?? null;
+}

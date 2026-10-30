@@ -1,4 +1,4 @@
-import { members } from "@mm/db";
+import { memberRepo } from "@mm/db";
 import { requireMemberContext } from "../../../lib/context";
 import { db } from "../../../lib/db";
 import { TopBar } from "../../top-bar";
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export default async function MembersPage() {
   const ctx = await requireMemberContext();
-  const list = await db().withTenant(ctx.tenantId, (tx) => members.listMembers(tx));
+  const list = await db().withTenant(ctx.tenantId, (tx) => memberRepo.listMembers(tx));
   const isAdmin = ctx.member.role === "admin";
 
   return (

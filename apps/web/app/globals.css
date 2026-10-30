@@ -107,7 +107,9 @@ form.inline {
   flex-wrap: wrap;
 }
 input[type="text"],
-input[type="email"] {
+input[type="email"],
+input[type="text"],
+select {
   flex: 1 1 240px;
   padding: 9px 11px;
   border: 1px solid var(--line);
@@ -149,4 +151,30 @@ code {
 }
 .error {
   color: var(--danger);
+}
+pre.secret {
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 13px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 8px 0;
+}
+.notice {
+  border-left: 3px solid var(--accent);
+  padding: 4px 0 4px 12px;
+  margin: 12px 0;
+}
+button.danger {
+  background: none;
+  color: var(--danger);
+  padding: 0;
+  font-weight: 400;
+}
+label.check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }

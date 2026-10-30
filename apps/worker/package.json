@@ -1,0 +1,20 @@
+{
+  "name": "@mm/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=../../.env.local src/main.ts",
+    "start": "node dist/main.js",
+    "build": "node ../../scripts/bundle.mjs src/main.ts dist/main.js",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@mm/db": "workspace:*",
+    "@mm/ingest": "workspace:*",
+    "@mm/privacy": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0"
+  }
+}

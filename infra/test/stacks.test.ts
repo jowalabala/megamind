@@ -2,6 +2,7 @@
 import { App } from "aws-cdk-lib";
 import { Match, Template } from "aws-cdk-lib/assertions";
 import { describe, expect, it } from "vitest";
+import { AppStack } from "../lib/app-stack.ts";
 import { STAGES } from "../lib/config.ts";
 import { DataStack } from "../lib/data-stack.ts";
 import { NetworkStack } from "../lib/network-stack.ts";
@@ -86,5 +87,66 @@ describe.each(["dev", "prod"] as const)("%s", (stage) => {
       DeletionPolicy: string;
     };
     expect(db.DeletionPolicy).toBe(stage === "prod" ? "Snapshot" : "Delete");
+  });
+});
+
+describe("app stack (api, worker, web)", () => {
+  // Asset staging off: the test checks wiring, not the Docker build.
+  const app = new App({ context: { "aws:cdk:disable-asset-staging": true } });
+  const cfg = STAGES.dev;
+  const network = new NetworkStack(app, "Net", cfg);
+  const data = new DataStack(app, "Data", cfg, { vpc: network.vpc });
+  const stack = new AppStack(app, "App", cfg, {
+    vpc: network.vpc,
+    db: data.db,
+    dbSecurityGroup: data.dbSecurityGroup,
+    appDbSecret: data.appDbSecret,
+    bronzeBucket: data.bronzeBucket,
+  });
+  const t = Template.fromStack(stack);
+
+  const policyActionsFor = (rolePrefix: string): string[] => {
+    const policies = t.findResources("AWS::IAM::Policy");
+    return Object.entries(policies)
+      .filter(([id]) => id.startsWith(rolePrefix))
+      .flatMap(([, p]) =>
+        (
+          p as { Properties: { PolicyDocument: { Statement: { Action: string | string[] }[] } } }
+        ).Properties.PolicyDocument.Statement.flatMap((st) => [st.Action].flat()),
+      );
+  };
+
+  it("the API can write raw payloads but never read or delete them", () => {
+    const actions = policyActionsFor("ApiTaskTaskRole");
+    expect(actions).toEqual(expect.arrayContaining(["s3:PutObject"]));
+    expect(actions.some((a) => /^s3:(Get|Delete)/.test(a))).toBe(false);
+  });
+
+  it("the worker can read and delete raw payloads and call Comprehend", () => {
+    const actions = policyActionsFor("WorkerTaskTaskRole");
+    expect(actions).toEqual(
+      expect.arrayContaining(["s3:GetObject*", "s3:DeleteObject*", "comprehend:DetectPiiEntities"]),
+    );
+    expect(actions).not.toContain("s3:PutObject");
+  });
+
+  it("routes /mcp and /v1/* to the API on the shared load balancer", () => {
+    t.hasResourceProperties("AWS::ElasticLoadBalancingV2::ListenerRule", {
+      Conditions: [{ Field: "path-pattern", PathPatternConfig: { Values: ["/mcp", "/v1/*"] } }],
+    });
+  });
+
+  it("web, api and worker each get their own Postgres ingress rule, nothing else", () => {
+    const rules = Object.values(t.findResources("AWS::EC2::SecurityGroupIngress")).filter(
+      (r) => (r as { Properties: { FromPort: number } }).Properties.FromPort === 5432,
+    );
+    expect(rules).toHaveLength(3);
+  });
+
+  it("the pseudonym secret is generated, not typed in", () => {
+    t.hasResourceProperties("AWS::SecretsManager::Secret", {
+      Name: "mastermind/dev/pseudonym",
+      GenerateSecretString: Match.objectLike({ PasswordLength: 64 }),
+    });
   });
 });

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import { installQueues } from "./queue.ts";
 
 const MIGRATIONS_DIR = fileURLToPath(new URL("../migrations/", import.meta.url));
 // Arbitrary constant: only one migrator runs at a time.
@@ -13,11 +14,17 @@ export interface MigrationResult {
 }
 
 /**
- * Applies pending SQL migrations in filename order, each in its own transaction.
- * Must run as the owner (migration) role, never as mm_app.
- * Migrations that were already applied are immutable: a changed checksum is an error.
+ * Applies pending SQL migrations in filename order, each in its own transaction, then
+ * installs or upgrades the job queue schema. Must run as the owner (migration) role,
+ * never as mm_app. Applied migrations are immutable: a changed checksum is an error.
  */
 export async function migrate(adminConnectionString: string): Promise<MigrationResult> {
+  const result = await migrateSql(adminConnectionString);
+  await installQueues(adminConnectionString);
+  return result;
+}
+
+async function migrateSql(adminConnectionString: string): Promise<MigrationResult> {
   const client = new pg.Client({ connectionString: adminConnectionString });
   await client.connect();
   const result: MigrationResult = { applied: [], skipped: [] };

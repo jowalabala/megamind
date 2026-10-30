@@ -7,3 +7,5 @@
 .env*
 !.env.example
 docs
+.data
+**/*.tsbuildinfo

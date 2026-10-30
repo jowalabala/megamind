@@ -3,22 +3,33 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { createDb, sql, TenantContextError, type MasterMindDb } from "../src/index.ts";
+import { createAgent, revokeAgent } from "../src/repos/agents.ts";
 import { addMemberToTeam, ensureMember } from "../src/repos/members.ts";
-import { teamMembers, teams } from "../src/schema.ts";
+import { agentKeys, tasks, teamMembers, teams } from "../src/schema.ts";
 import { adminQuery, startTestDatabase, type TestDatabase } from "../src/testing.ts";
 
 /** Tables that intentionally hold no tenant data. Each needs a reason, and mm_app must have no access. */
 const NON_TENANT_TABLES: Record<string, string> = {
   schema_migrations: "migration bookkeeping, owner-only",
 };
-/** Tenant tables where RLS is enabled but deliberately not FORCED (see the migration comment). */
-const RLS_NOT_FORCED = new Set(["tenants"]);
+/** Tenant tables where RLS is enabled but deliberately not FORCED (see the migration comments). */
+const RLS_NOT_FORCED = new Set(["tenants", "agent_keys"]);
+/** Tenant tables with a column mm_app must never read (checked below). */
+const SECRET_COLUMNS: Record<string, string> = { agent_keys: "key_hash" };
 const tenantColumn = (table: string) => (table === "tenants" ? "id" : "tenant_id");
 
 let env: TestDatabase;
 let db: MasterMindDb;
-let A: { tenantId: string; teamId: string; memberId: string };
-let B: { tenantId: string; teamId: string; memberId: string };
+interface Seeded {
+  tenantId: string;
+  teamId: string;
+  memberId: string;
+  agentId: string;
+  agentKey: string;
+  taskId: string;
+}
+let A: Seeded;
+let B: Seeded;
 let tenantTables: string[];
 
 async function seedTenant(slug: string) {
@@ -49,7 +60,43 @@ async function seedTenant(slug: string) {
     await tx.execute(sql`
       INSERT INTO llm_calls (tenant_id, stage, prompt_id, prompt_version, model, status, latency_ms, input_hash)
       VALUES (${t.tenantId}, 'test', 'seed', 1, 'test-model', 'ok', 1, ${"b".repeat(64)})`);
-    return { tenantId: t.tenantId, teamId: team!.id, memberId: member.id };
+    const { agent, key } = await createAgent(tx, t.tenantId, {
+      memberId: member.id,
+      name: "Claude Code",
+      kind: "claude_code",
+      createdByMemberId: member.id,
+    });
+    const taskId = crypto.randomUUID();
+    const [session] = await tx
+      .execute<{ id: string }>(
+        sql`
+      INSERT INTO agent_sessions (tenant_id, agent_identity_id, member_id, client_session_id)
+      VALUES (${t.tenantId}, ${agent.id}, ${member.id}, 'session-1') RETURNING id`,
+      )
+      .then((r) => r.rows);
+    await tx.execute(sql`
+      INSERT INTO tasks (id, tenant_id, member_id, agent_identity_id, agent_session_id, source, title_redacted)
+      VALUES (${taskId}, ${t.tenantId}, ${member.id}, ${agent.id}, ${session!.id}, 'mcp', 'Seed task')`);
+    await tx.execute(sql`
+      INSERT INTO artifacts (tenant_id, task_id, kind, content_redacted)
+      VALUES (${t.tenantId}, ${taskId}, 'text', 'seed')`);
+    await tx.execute(sql`
+      INSERT INTO external_refs (tenant_id, task_id, ref)
+      VALUES (${t.tenantId}, ${taskId}, ${`github:pr:${slug}/api#1`})`);
+    await tx.execute(sql`
+      INSERT INTO metric_observations (id, tenant_id, task_id, metric_key, value, source, observed_at)
+      VALUES (gen_random_uuid(), ${t.tenantId}, ${taskId}, 'seed.metric', 1, 'mcp', now())`);
+    await tx.execute(sql`
+      INSERT INTO action_events (tenant_id, id, session_id, member_id, kind, summary_redacted, occurred_at)
+      VALUES (${t.tenantId}, gen_random_uuid(), ${session!.id}, ${member.id}, 'edit', 'seed', now())`);
+    return {
+      tenantId: t.tenantId,
+      teamId: team!.id,
+      memberId: member.id,
+      agentId: agent.id,
+      agentKey: key,
+      taskId,
+    };
   });
 }
 
@@ -136,6 +183,20 @@ describe("reads", () => {
     }
   });
 
+  it("secret columns can't be read by mm_app, even inside its own tenant", async () => {
+    for (const [table, column] of Object.entries(SECRET_COLUMNS)) {
+      const { rows } = await adminQuery<{ can_select: boolean }>(
+        env.adminUrl,
+        `SELECT has_column_privilege('mm_app', $1, $2, 'SELECT') AS can_select`,
+        [table, column],
+      );
+      expect(rows[0]!.can_select, `${table}.${column}`).toBe(false);
+      await expect(
+        db.withTenant(A.tenantId, (tx) => tx.execute(sql.raw(`SELECT ${column} FROM ${table}`))),
+      ).rejects.toMatchObject({ cause: expect.objectContaining({ code: "42501" }) });
+    }
+  });
+
   it("inside tenant A, every table returns only A's rows (and the seed covers each table)", async () => {
     for (const table of tenantTables) {
       const col = tenantColumn(table);
@@ -216,6 +277,78 @@ describe("writes from tenant A aimed at tenant B", () => {
         tx.execute(sql`DELETE FROM tenants WHERE id = ${A.tenantId}`),
       ),
     ).rejects.toMatchObject(rlsViolation);
+  });
+});
+
+describe("agent keys", () => {
+  it("resolve to the right tenant, agent and member; unknown and malformed keys to null", async () => {
+    expect(await db.system.authenticateAgent(A.agentKey)).toEqual({
+      tenantId: A.tenantId,
+      agentId: A.agentId,
+      memberId: A.memberId,
+      scopes: ["capture:write"],
+      captureOptOut: false,
+    });
+    expect((await db.system.authenticateAgent(B.agentKey))?.tenantId).toBe(B.tenantId);
+    const forged = A.agentKey.slice(0, -1) + (A.agentKey.endsWith("a") ? "b" : "a");
+    expect(await db.system.authenticateAgent(forged)).toBeNull();
+    expect(await db.system.authenticateAgent("mm_live_short")).toBeNull();
+    expect(await db.system.authenticateAgent("' OR 1=1 --")).toBeNull();
+    // Authentication must not leave a tenant context on the pooled connection.
+    expect((await db.health()).leakedTenantContext).toBeNull();
+  });
+
+  it("report the member's capture opt-out", async () => {
+    await adminQuery(env.adminUrl, "UPDATE members SET capture_opt_out = true WHERE id = $1", [
+      A.memberId,
+    ]);
+    expect((await db.system.authenticateAgent(A.agentKey))?.captureOptOut).toBe(true);
+    await adminQuery(env.adminUrl, "UPDATE members SET capture_opt_out = false WHERE id = $1", [
+      A.memberId,
+    ]);
+  });
+
+  it("stop working as soon as they are revoked", async () => {
+    const created = await db.withTenant(A.tenantId, (tx) =>
+      createAgent(tx, A.tenantId, {
+        memberId: A.memberId,
+        name: "temp",
+        kind: "custom",
+        createdByMemberId: A.memberId,
+      }),
+    );
+    expect(await db.system.authenticateAgent(created.key)).not.toBeNull();
+    await db.withTenant(A.tenantId, (tx) => revokeAgent(tx, created.agent.id));
+    expect(await db.system.authenticateAgent(created.key)).toBeNull();
+  });
+
+  it("tenant A cannot register a key for B's agent, or revoke B's agent", async () => {
+    await expect(
+      db.withTenant(A.tenantId, (tx) =>
+        tx.insert(agentKeys).values({
+          keyHash: "c".repeat(64),
+          tenantId: B.tenantId,
+          agentIdentityId: B.agentId,
+        }),
+      ),
+    ).rejects.toMatchObject({ cause: expect.objectContaining({ code: "42501" }) });
+    expect(await db.withTenant(A.tenantId, (tx) => revokeAgent(tx, B.agentId))).toBeNull();
+    expect(await db.system.authenticateAgent(B.agentKey)).not.toBeNull();
+  });
+
+  it("tenant A cannot attach a task to B's member or agent (composite foreign keys)", async () => {
+    await expect(
+      db.withTenant(A.tenantId, (tx) =>
+        tx.insert(tasks).values({
+          id: crypto.randomUUID(),
+          tenantId: A.tenantId,
+          memberId: A.memberId,
+          agentIdentityId: B.agentId,
+          source: "mcp",
+          titleRedacted: "x",
+        }),
+      ),
+    ).rejects.toMatchObject({ cause: expect.objectContaining({ code: "23503" }) });
   });
 });
 

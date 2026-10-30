@@ -15,11 +15,14 @@
     "test": "turbo run test",
     "db:up": "docker compose up -d postgres",
     "db:migrate": "pnpm --filter @mm/db migrate",
-    "db:seed": "pnpm --filter @mm/db seed"
+    "db:seed": "pnpm --filter @mm/db seed",
+    "dev:api": "pnpm --filter @mm/api dev",
+    "dev:worker": "pnpm --filter @mm/worker dev"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",
     "@types/node": "^22.20.0",
+    "esbuild": "^0.28.0",
     "eslint": "^9.39.0",
     "prettier": "^3.6.0",
     "turbo": "^2.5.0",
@@ -29,10 +32,10 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "esbuild",
       "cpu-features",
-      "ssh2",
-      "protobufjs"
+      "esbuild",
+      "protobufjs",
+      "ssh2"
     ]
   }
 }

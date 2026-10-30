@@ -1,0 +1,17 @@
+{
+  "name": "@mm/privacy",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./comprehend": "./src/comprehend.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-comprehend": "^3.1150.0"
+  }
+}

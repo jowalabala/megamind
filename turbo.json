@@ -10,7 +10,7 @@
     },
     "test": {
       "dependsOn": ["^typecheck"],
-      "env": ["DATABASE_URL", "TESTCONTAINERS_*", "DOCKER_HOST"]
+      "env": ["DATABASE_URL", "TEST_DATABASE_ADMIN_URL", "TESTCONTAINERS_*", "DOCKER_HOST"]
     }
   }
 }
