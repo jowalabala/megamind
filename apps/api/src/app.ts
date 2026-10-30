@@ -2,7 +2,7 @@
 // Every route except /healthz needs an agent key; the tenant always comes from that key.
 import { createHash } from "node:crypto";
 import rateLimit from "@fastify/rate-limit";
-import type { AuthenticatedAgent, MasterMindDb } from "@mm/db";
+import { historyRepo, type AuthenticatedAgent, type MasterMindDb } from "@mm/db";
 import {
   acceptActions,
   acceptOutcome,
@@ -13,13 +13,18 @@ import {
   reportOutcomeInput,
   type AcceptDeps,
   type AcceptResult,
+  type IngestSource,
 } from "@mm/ingest";
 import {
   registerCaptureTools,
+  registerHistoryTools,
+  searchHistoryInput,
   SERVER_INFO,
   SERVER_INSTRUCTIONS,
   ToolUserError,
   type CaptureResult,
+  type SearchHistoryInput,
+  type SearchHistoryResult,
 } from "@mm/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -41,6 +46,37 @@ declare module "fastify" {
 
 const toCapture = (r: AcceptResult): CaptureResult =>
   r.captured ? { captured: true, id: r.id } : { captured: false, reason: r.reason };
+
+/** The local bridge identifies itself; everything else counts as remote MCP. */
+const sourceOf = (req: FastifyRequest): IngestSource =>
+  /^mm-bridge\//.test(String(req.headers["x-mm-client"] ?? "")) ? "bridge" : "mcp";
+
+async function searchHistory(
+  db: MasterMindDb,
+  agent: AuthenticatedAgent,
+  input: SearchHistoryInput,
+): Promise<SearchHistoryResult> {
+  if (!agent.scopes.includes("history:read")) {
+    throw new IngestForbiddenError("This agent key does not have the history:read scope.");
+  }
+  if (!input.query && !input.resource) {
+    throw Object.assign(new Error("Give a query, a resource, or both."), { statusCode: 400 });
+  }
+  const items = await db.withTenant(agent.tenantId, (tx) =>
+    historyRepo.searchHistory(tx, {
+      requesterMemberId: agent.memberId,
+      text: input.query,
+      resource: input.resource,
+      kinds: input.kinds,
+      since: input.since ? new Date(input.since) : undefined,
+      before: input.before ? new Date(input.before) : undefined,
+      limit: input.limit,
+    }),
+  );
+  return {
+    items: items.map(({ taskId, ...rest }) => ({ ...rest, task_id: taskId })),
+  };
+}
 
 export async function buildApp(deps: AppDeps) {
   const app = Fastify({
@@ -103,8 +139,15 @@ export async function buildApp(deps: AppDeps) {
         throw err;
       });
     registerCaptureTools(server, {
-      logTask: (input) => forbidden(() => acceptTask(deps, agent, input)),
-      reportOutcome: (input) => forbidden(() => acceptOutcome(deps, agent, input)),
+      logTask: (input) => forbidden(() => acceptTask(deps, agent, input, sourceOf(req))),
+      reportOutcome: (input) => forbidden(() => acceptOutcome(deps, agent, input, sourceOf(req))),
+    });
+    registerHistoryTools(server, {
+      searchHistory: (input) =>
+        searchHistory(deps.db, agent, input).catch((err) => {
+          if (err instanceof IngestForbiddenError) throw new ToolUserError(err.message);
+          throw err;
+        }),
     });
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
@@ -126,17 +169,28 @@ export async function buildApp(deps: AppDeps) {
 
   // REST equivalents. Same validation, same pipeline.
   app.post("/v1/tasks", { preHandler: requireAgent }, async (req, reply) => {
-    const result = await acceptTask(deps, req.agent!, logTaskInput.parse(req.body));
+    const result = await acceptTask(deps, req.agent!, logTaskInput.parse(req.body), sourceOf(req));
     return reply.code(result.captured ? 202 : 200).send(result);
   });
   app.post("/v1/outcomes", { preHandler: requireAgent }, async (req, reply) => {
-    const result = await acceptOutcome(deps, req.agent!, reportOutcomeInput.parse(req.body));
+    const input = reportOutcomeInput.parse(req.body);
+    const result = await acceptOutcome(deps, req.agent!, input, sourceOf(req));
     return reply.code(result.captured ? 202 : 200).send(result);
   });
   app.post("/v1/actions", { preHandler: requireAgent }, async (req, reply) => {
-    const result = await acceptActions(deps, req.agent!, actionBatchInput.parse(req.body));
+    const input = actionBatchInput.parse(req.body);
+    const result = await acceptActions(deps, req.agent!, input, sourceOf(req));
     return reply.code(result.captured ? 202 : 200).send(result);
   });
+  app.post("/v1/history/search", { preHandler: requireAgent }, async (req) =>
+    searchHistory(deps.db, req.agent!, searchHistoryInput.parse(req.body)),
+  );
+  // Lets the bridge check a key at login. Ids and scopes only.
+  app.get("/v1/whoami", { preHandler: requireAgent }, async (req) => ({
+    agent_id: req.agent!.agentId,
+    scopes: req.agent!.scopes,
+    capture_opt_out: req.agent!.captureOptOut,
+  }));
 
   return app;
 }

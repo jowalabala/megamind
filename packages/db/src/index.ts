@@ -10,7 +10,12 @@ export {
   type TenantTx,
 } from "./client.ts";
 export { databaseSslFromEnv, databaseUrlFromEnv } from "./env.ts";
+export * from "./constants.ts";
 export * as agentRepo from "./repos/agents.ts";
+export * as erasureRepo from "./repos/erasure.ts";
+export { ErasureNotAllowedError } from "./repos/erasure.ts";
+export * as historyRepo from "./repos/history.ts";
+export type { HistoryItem, HistoryOutcome, HistoryQuery } from "./repos/history.ts";
 export * as memberRepo from "./repos/members.ts";
 export * from "./schema.ts";
-export { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+export { and, asc, desc, eq, inArray, isNull, lt, lte, sql } from "drizzle-orm";

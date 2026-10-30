@@ -12,6 +12,7 @@
   "dependencies": {
     "@mm/db": "workspace:*",
     "@mm/ingest": "workspace:*",
+    "@mm/lake": "workspace:*",
     "@mm/privacy": "workspace:*"
   },
   "devDependencies": {

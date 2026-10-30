@@ -1,9 +1,13 @@
-// Bundles a Node service (api, worker) into one ESM file, so the runtime image needs no
-// node_modules and no TypeScript tooling. Usage: node scripts/bundle.mjs <entry> <outfile>
+// Bundles a Node program (api, worker, bridge) into one ESM file, so it runs without
+// node_modules or TypeScript tooling. Usage: node scripts/bundle.mjs <entry> <outfile> [--bin]
+// --bin adds a shebang and makes the output executable (the bridge's `mm` command).
 /* global process, console */
 import { build } from "esbuild";
 
-const [entry, outfile] = process.argv.slice(2);
+import { chmodSync } from "node:fs";
+
+const [entry, outfile, ...flags] = process.argv.slice(2);
+const bin = flags.includes("--bin");
 if (!entry || !outfile) {
   console.error("usage: bundle.mjs <entry.ts> <out.js>");
   process.exit(1);
@@ -22,8 +26,11 @@ await build({
   external: ["pg-native", "@cfworker/json-schema"],
   // Some bundled CommonJS code calls require(); give ESM output a real one.
   banner: {
-    js: "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);",
+    js:
+      (bin ? "#!/usr/bin/env node\n" : "") +
+      "import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);",
   },
   logLevel: "warning",
 });
+if (bin) chmodSync(outfile, 0o755);
 console.log(`bundled ${entry} -> ${outfile}`);

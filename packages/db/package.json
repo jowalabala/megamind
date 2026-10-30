@@ -5,6 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./admin": "./src/admin.ts",
+    "./constants": "./src/constants.ts",
     "./testing": "./src/testing.ts",
     "./migrate": "./src/migrate.ts",
     "./queue": "./src/queue.ts"

@@ -1,6 +1,7 @@
 "use server";
 
 import { appendAuditEvent } from "@mm/audit";
+import { eq, erasureRepo, ErasureNotAllowedError, members } from "@mm/db";
 import { getWorkOS } from "@workos-inc/authkit-nextjs";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -40,4 +41,64 @@ export async function inviteMember(
   );
   revalidatePath("/settings/members");
   return { ok: `Invitation sent to ${parsed.data}.` };
+}
+
+/**
+ * Removes a member and erases what they captured. Their WorkOS membership goes first, so
+ * they can't sign back in (which would recreate the member). Postgres rows are deleted
+ * now; the worker removes their raw payloads and lake rows over the next ~15 minutes.
+ */
+export async function eraseMember(
+  _prev: { error?: string; ok?: string } | undefined,
+  formData: FormData,
+) {
+  const ctx = await requireMemberContext();
+  if (ctx.member.role !== "admin") return { error: "Only admins can remove members." };
+  const memberId = z.uuid().safeParse(formData.get("memberId"));
+  if (!memberId.success) return { error: "Unknown member." };
+  if (String(formData.get("confirm") ?? "").trim() !== "ERASE") {
+    return { error: "Type ERASE to confirm." };
+  }
+  if (memberId.data === ctx.member.id) {
+    return { error: "You can't remove yourself; ask another admin." };
+  }
+
+  const [subject] = await db().withTenant(ctx.tenantId, (tx) =>
+    tx
+      .select({ workosUserId: members.workosUserId })
+      .from(members)
+      .where(eq(members.id, memberId.data)),
+  );
+  if (!subject) return { error: "That member no longer exists." };
+
+  const workos = getWorkOS();
+  const memberships = await workos.userManagement.listOrganizationMemberships({
+    organizationId: ctx.organizationId,
+    userId: subject.workosUserId,
+  });
+  for (const m of memberships.data) {
+    await workos.userManagement.deleteOrganizationMembership(m.id);
+  }
+
+  try {
+    await db().withTenant(ctx.tenantId, async (tx) => {
+      const request = await erasureRepo.requestMemberErasure(tx, ctx.tenantId, {
+        subjectMemberId: memberId.data,
+        requestedByMemberId: ctx.member.id,
+      });
+      await appendAuditEvent(tx, ctx.tenantId, {
+        actorType: "member",
+        actorId: ctx.member.id,
+        action: "member.erasure_requested",
+        targetType: "erasure_request",
+        targetId: request.id,
+        payload: { subjectMemberId: memberId.data },
+      });
+    });
+  } catch (err) {
+    if (err instanceof ErasureNotAllowedError) return { error: err.message };
+    throw err;
+  }
+  revalidatePath("/settings/members");
+  return { ok: "Member removed. Their data is deleted now; raw and lake copies within minutes." };
 }

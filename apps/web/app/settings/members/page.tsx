@@ -2,6 +2,7 @@ import { memberRepo } from "@mm/db";
 import { requireMemberContext } from "../../../lib/context";
 import { db } from "../../../lib/db";
 import { TopBar } from "../../top-bar";
+import { EraseMemberForm } from "./erase-form";
 import { InviteForm } from "./invite-form";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +26,13 @@ export default async function MembersPage() {
           </>
         )}
         <h2>Everyone in {ctx.tenant.name}</h2>
+        {isAdmin && (
+          <p className="muted">
+            Removing a member signs them out of {ctx.tenant.name} and erases everything their agents
+            captured: database rows at once, raw copies and the data lake within minutes. Old lake
+            snapshots expire within 11 days.
+          </p>
+        )}
         <div className="card">
           <table>
             <thead>
@@ -33,6 +41,7 @@ export default async function MembersPage() {
                 <th>Email</th>
                 <th>Role</th>
                 <th>Capture</th>
+                {isAdmin && <th />}
               </tr>
             </thead>
             <tbody>
@@ -44,6 +53,13 @@ export default async function MembersPage() {
                     <span className="pill">{m.role}</span>
                   </td>
                   <td className="muted">{m.captureOptOut ? "Opted out" : "On"}</td>
+                  {isAdmin && (
+                    <td>
+                      {m.id !== ctx.member.id && (
+                        <EraseMemberForm memberId={m.id} label={m.displayName ?? m.email} />
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

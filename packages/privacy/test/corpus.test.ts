@@ -46,12 +46,15 @@ function score() {
   const tally = { secret: { hit: 0, total: 0 }, pii: { hit: 0, total: 0 } };
   const misses: string[] = [];
   const falsePositives: string[] = [];
+  const notIdempotent: string[] = [];
   let keepTotal = 0;
   for (const e of corpus) {
     if (e.requires === "comprehend") continue;
     const cache = new Map<string, string>();
     const text = expand(e.text, cache, e.id);
     const out = redactor.redactSync(text).text;
+    // The bridge redacts first and the server again: a second pass must change nothing.
+    if (redactor.redactSync(out).text !== out) notIdempotent.push(e.id);
     for (const span of e.expect) {
       const value = expand(span.value, cache, e.id);
       const cat = categoryOf(span.label);
@@ -66,7 +69,7 @@ function score() {
         falsePositives.push(`${e.id}: ${JSON.stringify(out)}`);
     }
   }
-  return { tally, misses, falsePositives, keepTotal };
+  return { tally, misses, falsePositives, notIdempotent, keepTotal };
 }
 
 describe("labelled corpus (deterministic layers)", () => {
@@ -85,6 +88,10 @@ describe("labelled corpus (deterministic layers)", () => {
 
   it("PII recall >= 0.95 (names and addresses outside the directory need Comprehend)", () => {
     expect(recall(r.tally.pii), r.misses.join("\n")).toBeGreaterThanOrEqual(0.95);
+  });
+
+  it("redacting already-redacted text changes nothing", () => {
+    expect(r.notIdempotent).toEqual([]);
   });
 
   it("false positives <= 5% of strings that must survive", () => {

@@ -1,7 +1,9 @@
 // Typed mirror of the SQL migrations in ../migrations, which are the source of truth.
 // test/schema-drift.test.ts fails if the two disagree.
+import { sql } from "drizzle-orm";
 import {
   bigint,
+  customType,
   boolean,
   doublePrecision,
   integer,
@@ -14,9 +16,19 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
+import {
+  AGENT_KINDS,
+  ARTIFACT_KINDS,
+  CAPTURE_SOURCES,
+  DEFAULT_AGENT_SCOPES,
+  type AgentScope,
+} from "./constants.ts";
 
 export const memberRole = pgEnum("member_role", ["admin", "category_owner", "member"]);
 export const visibilityPref = pgEnum("visibility_pref", ["name", "team", "anonymous"]);
+
+/** Generated full-text search column; written by Postgres, never by the app. */
+const tsvector = customType<{ data: string }>({ dataType: () => "tsvector" });
 
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 
@@ -28,6 +40,7 @@ export const tenants = pgTable("tenants", {
   region: text("region").notNull().default("us-east-1"),
   kmsKeyArn: text("kms_key_arn"),
   createdAt: createdAt(),
+  lakeReadyAt: timestamp("lake_ready_at", { withTimezone: true }),
 });
 
 export const teams = pgTable("teams", {
@@ -108,14 +121,7 @@ export const llmCalls = pgTable("llm_calls", {
 
 // Capture (migration 0005) -------------------------------------------------------
 
-export const captureSource = pgEnum("capture_source", [
-  "mcp",
-  "bridge",
-  "github",
-  "hubspot",
-  "csv",
-  "ui",
-]);
+export const captureSource = pgEnum("capture_source", CAPTURE_SOURCES);
 export const taskState = pgEnum("task_state", [
   "logged",
   "categorized",
@@ -131,16 +137,7 @@ export const actionKind = pgEnum("action_kind", [
   "outcome",
 ]);
 
-export const AGENT_KINDS = [
-  "claude_code",
-  "cursor",
-  "chatgpt",
-  "copilot",
-  "custom",
-  "bridge",
-] as const;
-export const AGENT_SCOPES = ["capture:write", "skills:read", "collab"] as const;
-export type AgentScope = (typeof AGENT_SCOPES)[number];
+export { AGENT_KINDS, AGENT_SCOPES, ARTIFACT_KINDS, type AgentScope } from "./constants.ts";
 
 export const agentIdentities = pgTable("agent_identities", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -149,7 +146,7 @@ export const agentIdentities = pgTable("agent_identities", {
   name: text("name").notNull(),
   kind: text("kind", { enum: AGENT_KINDS }).notNull(),
   keyPrefix: text("key_prefix").notNull(),
-  scopes: text("scopes").array().$type<AgentScope[]>().notNull().default(["capture:write"]),
+  scopes: text("scopes").array().$type<AgentScope[]>().notNull().default(DEFAULT_AGENT_SCOPES),
   createdByMemberId: uuid("created_by_member_id"),
   createdAt: createdAt(),
   lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
@@ -198,9 +195,10 @@ export const tasks = pgTable("tasks", {
   completedAt: timestamp("completed_at", { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  search: tsvector("search").generatedAlwaysAs(
+    sql`to_tsvector('simple', mm_search_text(title_redacted || ' ' || summary_redacted))`,
+  ),
 });
-
-export const ARTIFACT_KINDS = ["text", "diff", "email", "document", "link", "other"] as const;
 
 export const artifacts = pgTable("artifacts", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -250,9 +248,47 @@ export const actionEvents = pgTable(
     resources: text("resources").array().notNull().default([]),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
     createdAt: createdAt(),
+    source: captureSource("source").notNull().default("mcp"),
+    search: tsvector("search").generatedAlwaysAs(
+      sql`to_tsvector('simple', mm_search_text(summary_redacted))`,
+    ),
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.id] })],
 );
+
+// Lake and erasure (migration 0006) ----------------------------------------------------
+
+export const LAKE_TABLES = ["actions", "tasks", "metric_observations"] as const;
+export type LakeTableName = (typeof LAKE_TABLES)[number];
+
+export const lakeOutbox = pgTable("lake_outbox", {
+  id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: uuid("tenant_id").notNull(),
+  memberId: uuid("member_id"),
+  lakeTable: text("lake_table", { enum: LAKE_TABLES }).notNull(),
+  eventId: uuid("event_id").notNull(),
+  row: jsonb("row").$type<Record<string, unknown>>().notNull(),
+  createdAt: createdAt(),
+});
+
+export const ERASURE_STATUSES = ["pending", "first_pass_done", "done", "failed"] as const;
+
+export const erasureRequests = pgTable("erasure_requests", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id").notNull(),
+  subjectMemberId: uuid("subject_member_id").notNull(),
+  requestedByMemberId: uuid("requested_by_member_id"),
+  status: text("status", { enum: ERASURE_STATUSES }).notNull().default("pending"),
+  bronzeDeletedAt: timestamp("bronze_deleted_at", { withTimezone: true }),
+  lakeFirstPassAt: timestamp("lake_first_pass_at", { withTimezone: true }),
+  lakeSecondPassDue: timestamp("lake_second_pass_due", { withTimezone: true }),
+  lakeSecondPassAt: timestamp("lake_second_pass_at", { withTimezone: true }),
+  physicallyErasedBy: timestamp("physically_erased_by", { withTimezone: true }),
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
+  createdAt: createdAt(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 /** Every Drizzle table, used by the drift test. */
 export const allTables = {
@@ -271,4 +307,6 @@ export const allTables = {
   externalRefs,
   metricObservations,
   actionEvents,
+  lakeOutbox,
+  erasureRequests,
 };

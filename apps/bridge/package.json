@@ -1,0 +1,25 @@
+{
+  "name": "@mm/bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Master Mind local bridge: MCP server and Claude Code hooks (published later as @mastermind/bridge).",
+  "type": "module",
+  "bin": {
+    "mm": "./dist/mm.js"
+  },
+  "scripts": {
+    "dev": "tsx src/main.ts",
+    "build": "node ../../scripts/bundle.mjs src/main.ts dist/mm.js --bin",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@mm/mcp": "workspace:*",
+    "@mm/privacy": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0"
+  }
+}

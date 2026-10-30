@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import type { TenantTx } from "../client.ts";
+import { DEFAULT_AGENT_SCOPES } from "../constants.ts";
 import { AGENT_KINDS, agentIdentities, agentKeys, type AgentScope } from "../schema.ts";
 
 export type AgentIdentity = typeof agentIdentities.$inferSelect;
@@ -50,7 +51,7 @@ export async function createAgent(
       name: input.name,
       kind: input.kind,
       keyPrefix: prefix,
-      scopes: input.scopes ?? ["capture:write"],
+      scopes: input.scopes ?? DEFAULT_AGENT_SCOPES,
       createdByMemberId: input.createdByMemberId,
     })
     .returning();

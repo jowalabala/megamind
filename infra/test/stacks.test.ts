@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { AppStack } from "../lib/app-stack.ts";
 import { STAGES } from "../lib/config.ts";
 import { DataStack } from "../lib/data-stack.ts";
+import { LakeStack } from "../lib/lake-stack.ts";
 import { NetworkStack } from "../lib/network-stack.ts";
 
 function synth(stage: "dev" | "prod") {
@@ -96,12 +97,19 @@ describe("app stack (api, worker, web)", () => {
   const cfg = STAGES.dev;
   const network = new NetworkStack(app, "Net", cfg);
   const data = new DataStack(app, "Data", cfg, { vpc: network.vpc });
+  const lake = new LakeStack(app, "Lake", cfg);
   const stack = new AppStack(app, "App", cfg, {
     vpc: network.vpc,
     db: data.db,
     dbSecurityGroup: data.dbSecurityGroup,
     appDbSecret: data.appDbSecret,
     bronzeBucket: data.bronzeBucket,
+    lake: {
+      streamName: lake.streamName,
+      streamArn: lake.streamArn,
+      tableBucketArn: lake.tableBucketArn,
+      tenantRolePathArn: lake.tenantRolePathArn,
+    },
   });
   const t = Template.fromStack(stack);
 
@@ -130,6 +138,29 @@ describe("app stack (api, worker, web)", () => {
     expect(actions).not.toContain("s3:PutObject");
   });
 
+  it("the worker publishes to the lake stream and reaches tenant data only via tenant roles", () => {
+    const statements = Object.entries(t.findResources("AWS::IAM::Policy"))
+      .filter(([id]) => id.startsWith("WorkerTaskTaskRole"))
+      .flatMap(
+        ([, p]) =>
+          (
+            p as {
+              Properties: {
+                PolicyDocument: { Statement: { Action: unknown; Resource: unknown }[] };
+              };
+            }
+          ).Properties.PolicyDocument.Statement,
+      );
+    const assume = statements.find((st) => st.Action === "sts:AssumeRole")!;
+    expect(JSON.stringify(assume.Resource)).toContain("role/mastermind/dev/lake/*");
+    expect(statements.some((st) => st.Action === "firehose:PutRecordBatch")).toBe(true);
+    const actions = statements.flatMap((st) => [st.Action].flat()) as string[];
+    // (kms: actions are for the bronze bucket's key.)
+    expect(actions.some((a) => /^(athena|glue|s3tables|lakeformation):/.test(a))).toBe(false);
+    const api = policyActionsFor("ApiTaskTaskRole");
+    expect(api.some((a) => /^(sts:AssumeRole|firehose:)/.test(a))).toBe(false);
+  });
+
   it("routes /mcp and /v1/* to the API on the shared load balancer", () => {
     t.hasResourceProperties("AWS::ElasticLoadBalancingV2::ListenerRule", {
       Conditions: [{ Field: "path-pattern", PathPatternConfig: { Values: ["/mcp", "/v1/*"] } }],
@@ -148,5 +179,100 @@ describe("app stack (api, worker, web)", () => {
       Name: "mastermind/dev/pseudonym",
       GenerateSecretString: Match.objectLike({ PasswordLength: 64 }),
     });
+  });
+});
+
+describe.each(["dev", "prod"] as const)("lake stack (%s)", (stage) => {
+  const app = new App();
+  const cfg = STAGES[stage];
+  const t = Template.fromStack(new LakeStack(app, "Lake", cfg));
+
+  it("the table bucket is KMS-encrypted and removes unreferenced files", () => {
+    t.hasResourceProperties("AWS::S3Tables::TableBucket", {
+      TableBucketName: `mastermind-${stage}-lake`,
+      EncryptionConfiguration: Match.objectLike({ SSEAlgorithm: "aws:kms" }),
+      UnreferencedFileRemoval: { Status: "Enabled", UnreferencedDays: 3, NoncurrentDays: 1 },
+    });
+  });
+
+  it("the stream is encrypted and routes each record to its tenant namespace and table", () => {
+    t.hasResourceProperties("AWS::KinesisFirehose::DeliveryStream", {
+      DeliveryStreamType: "DirectPut",
+      DeliveryStreamEncryptionConfigurationInput: Match.objectLike({
+        KeyType: "CUSTOMER_MANAGED_CMK",
+      }),
+      IcebergDestinationConfiguration: Match.objectLike({
+        AppendOnly: true,
+        // CloudFormation spells this one with a lowercase s for Iceberg destinations.
+        s3BackupMode: "FailedDataOnly",
+        CatalogConfiguration: {
+          CatalogArn: Match.objectLike({
+            "Fn::Join": Match.arrayWith([
+              Match.arrayWith([`:catalog/s3tablescatalog/mastermind-${stage}-lake`]),
+            ]),
+          }),
+        },
+        ProcessingConfiguration: Match.objectLike({
+          Processors: [
+            Match.objectLike({
+              Type: "MetadataExtraction",
+              Parameters: Match.arrayWith([
+                Match.objectLike({
+                  ParameterName: "MetadataExtractionQuery",
+                  ParameterValue: Match.stringLikeRegexp("._mm_namespace.*._mm_table"),
+                }),
+              ]),
+            }),
+          ],
+        }),
+      }),
+    });
+  });
+
+  it("results and error buckets are private, encrypted and short-lived", () => {
+    const buckets = Object.values(t.findResources("AWS::S3::Bucket")) as {
+      Properties: Record<
+        string,
+        { Rules?: { ExpirationInDays?: number }[] } & Record<string, unknown>
+      >;
+    }[];
+    expect(buckets).toHaveLength(2);
+    for (const b of buckets) {
+      expect(JSON.stringify(b.Properties.BucketEncryption)).toContain("aws:kms");
+      expect(b.Properties.PublicAccessBlockConfiguration).toMatchObject({
+        BlockPublicAcls: true,
+        RestrictPublicBuckets: true,
+      });
+      expect(b.Properties.LifecycleConfiguration!.Rules![0]!.ExpirationInDays).toBeLessThanOrEqual(
+        30,
+      );
+    }
+  });
+
+  it("the tenant role boundary allows only tenant workgroups and tenant-tagged keys", () => {
+    const [boundary] = Object.values(t.findResources("AWS::IAM::ManagedPolicy")) as {
+      Properties: {
+        PolicyDocument: {
+          Statement: { Action: string | string[]; Resource: unknown; Condition?: unknown }[];
+        };
+      };
+    }[];
+    const st = boundary!.Properties.PolicyDocument.Statement;
+    const actions = st.flatMap((x) => [x.Action].flat());
+    expect(actions.some((a) => /^(iam|sts|s3tables|firehose):/.test(a))).toBe(false);
+    const athena = st.find((x) => [x.Action].flat().includes("athena:StartQueryExecution"))!;
+    expect(JSON.stringify(athena.Resource)).toContain(`workgroup/mm-${stage}-t-*`);
+    const kms = st.find((x) => [x.Action].flat().includes("kms:Decrypt"))!;
+    expect(kms.Condition).toEqual({
+      StringEquals: {
+        "aws:ResourceTag/mm:purpose": "lake-tenant",
+        "aws:ResourceTag/mm:stage": stage,
+      },
+    });
+  });
+
+  it("creates the account-level catalog integration only where configured", () => {
+    t.resourceCountIs("AWS::Glue::Catalog", cfg.lakeIntegration === "create" ? 1 : 0);
+    t.resourceCountIs("AWS::LakeFormation::Resource", cfg.lakeIntegration === "create" ? 1 : 0);
   });
 });

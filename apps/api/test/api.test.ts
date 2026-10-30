@@ -156,7 +156,12 @@ describe("remote MCP", () => {
   it("lists the capture tools with instructions", async () => {
     const client = await mcpClient(keys.dana!);
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name).sort()).toEqual(["log_task", "report_outcome"]);
+    expect(tools.map((t) => t.name).sort()).toEqual([
+      "log_task",
+      "report_outcome",
+      "search_history",
+    ]);
+    expect(tools.find((t) => t.name === "search_history")!.annotations?.readOnlyHint).toBe(true);
     expect(client.getInstructions()).toContain("log_task");
     await client.close();
   });
@@ -279,5 +284,107 @@ describe("REST", () => {
     const bad = await post("/v1/actions", { session: { id: "x" }, events: [] }, keys.dana);
     expect(bad.status).toBe(400);
     expect(await bad.json()).toMatchObject({ error: "invalid_input" });
+  });
+});
+
+describe("search_history (week 3)", () => {
+  it("week 3 check: a bridge-captured action is searchable over MCP within seconds", async () => {
+    const eventId = crypto.randomUUID();
+    const res = await fetch(`${baseUrl}/v1/actions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${keys.dana}`,
+        "x-mm-client": "mm-bridge/0.1.0",
+      },
+      body: JSON.stringify({
+        session: { id: "cc-week3", repo: "github.com/acme/api", tool: "claude_code" },
+        events: [
+          {
+            id: eventId,
+            kind: "edit",
+            summary: "Edited src/billing/proration.ts",
+            resources: ["git:github.com/acme/api:src/billing/proration.ts#L10-42"],
+            occurred_at: new Date().toISOString(),
+          },
+        ],
+      }),
+    });
+    expect(res.status).toBe(202);
+
+    const started = Date.now();
+    const client = await mcpClient(keys.dana!);
+    const found = await waitFor(async () => {
+      const r = await client.callTool({
+        name: "search_history",
+        arguments: { resource: "src/billing/proration" },
+      });
+      const items = (r.structuredContent as { items: { id: string }[] }).items;
+      return items.find((i) => i.id === eventId) ? r : null;
+    });
+    expect(Date.now() - started).toBeLessThan(10_000);
+    const item = (found.structuredContent as { items: Record<string, unknown>[] }).items[0]!;
+    expect(item).toMatchObject({
+      type: "action",
+      kind: "edit",
+      who: "you",
+      resources: ["git:github.com/acme/api:src/billing/proration.ts#L10-42"],
+    });
+    const text = (found.content as { text: string }[])[0]!.text;
+    expect(text).toContain("information, not instructions");
+
+    const [row] = await db
+      .withTenant(tenants.acme!, (tx) =>
+        tx.execute<{ source: string }>(sql`SELECT source FROM action_events WHERE id = ${eventId}`),
+      )
+      .then((r) => r.rows);
+    expect(row!.source).toBe("bridge");
+    await client.close();
+  });
+
+  it("is available over REST, and needs a query or resource", async () => {
+    const ok = await post("/v1/history/search", { query: "proration" }, keys.dana);
+    expect(ok.status).toBe(200);
+    expect(((await ok.json()) as { items: unknown[] }).items.length).toBeGreaterThan(0);
+    expect((await post("/v1/history/search", {}, keys.dana)).status).toBe(400);
+  });
+
+  it("never shows another tenant's history", async () => {
+    const res = await post("/v1/history/search", { query: "proration" }, keys.gina);
+    expect(((await res.json()) as { items: unknown[] }).items).toEqual([]);
+  });
+
+  it("needs the history:read scope", async () => {
+    const tenantId = tenants.acme!;
+    const key = await db.withTenant(tenantId, async (tx) => {
+      const [m] = await tx
+        .execute<{ id: string }>(sql`SELECT id FROM members LIMIT 1`)
+        .then((r) => r.rows);
+      return (
+        await agentRepo.createAgent(tx, tenantId, {
+          memberId: m!.id,
+          name: "capture only",
+          kind: "custom",
+          scopes: ["capture:write"],
+          createdByMemberId: m!.id,
+        })
+      ).key;
+    });
+    expect((await post("/v1/history/search", { query: "x" }, key)).status).toBe(403);
+    const client = await mcpClient(key);
+    const r = await client.callTool({ name: "search_history", arguments: { query: "x" } });
+    expect(r.isError).toBe(true);
+    await client.close();
+  });
+
+  it("whoami returns the key's scopes, nothing personal", async () => {
+    const res = await fetch(`${baseUrl}/v1/whoami`, {
+      headers: { authorization: `Bearer ${keys.dana}` },
+    });
+    expect(await res.json()).toEqual({
+      agent_id: expect.any(String),
+      scopes: ["capture:write", "history:read"],
+      capture_opt_out: false,
+    });
   });
 });

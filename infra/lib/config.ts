@@ -11,6 +11,11 @@ export interface StageConfig {
   webDesiredCount: number;
   apiDesiredCount: number;
   workerDesiredCount: number;
+  /**
+   * The S3 Tables <-> Glue/Lake Formation integration exists once per account and region.
+   * "create" makes it in the lake stack; "existing" assumes it was set up already.
+   */
+  lakeIntegration: "create" | "existing";
 }
 
 export const STAGES: Record<Stage, StageConfig> = {
@@ -24,6 +29,7 @@ export const STAGES: Record<Stage, StageConfig> = {
     webDesiredCount: 1,
     apiDesiredCount: 1,
     workerDesiredCount: 1,
+    lakeIntegration: "create",
   },
   prod: {
     stage: "prod",
@@ -35,6 +41,8 @@ export const STAGES: Record<Stage, StageConfig> = {
     webDesiredCount: 2,
     apiDesiredCount: 2,
     workerDesiredCount: 1,
+    // Prod shares the account-level integration with dev when both live in one account.
+    lakeIntegration: "existing",
   },
 };
 

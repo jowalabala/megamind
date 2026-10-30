@@ -7,6 +7,8 @@ import type { QueueClient, QueueName } from "@mm/db/queue";
 import { bronzeKey, type BronzeKind, type BronzeStore } from "./bronze.ts";
 import type { ActionBatchInput, LogTaskInput, ReportOutcomeInput } from "./schemas.ts";
 
+export type IngestSource = "mcp" | "bridge";
+
 export interface AcceptDeps {
   queue: Pick<QueueClient, "send">;
   bronze: BronzeStore;
@@ -24,6 +26,8 @@ export interface IngestJob {
   /** Task id, observation id or action batch id. */
   id: string;
   bronzeKey: string;
+  /** How it arrived: the remote MCP server or the local bridge. */
+  source?: IngestSource;
 }
 
 /** What bronze holds for one request. */
@@ -56,6 +60,7 @@ async function accept<T>(
   queueName: QueueName,
   id: string,
   payload: T,
+  source: IngestSource,
 ): Promise<AcceptResult> {
   if (!agent.scopes.includes("capture:write")) {
     throw new IngestForbiddenError("This agent key does not have the capture:write scope.");
@@ -64,7 +69,7 @@ async function accept<T>(
   if (agent.captureOptOut) return { captured: false, reason: "capture_opt_out" };
 
   const now = (deps.now ?? (() => new Date()))();
-  const key = bronzeKey(agent.tenantId, kind, id, now);
+  const key = bronzeKey(agent.tenantId, agent.memberId, kind, id, now);
   const envelope: BronzeEnvelope<T> = {
     v: 1,
     kind,
@@ -81,34 +86,42 @@ async function accept<T>(
     agentId: agent.agentId,
     id,
     bronzeKey: key,
+    source,
   };
   // The job id is the record id, so a retried request queues nothing new.
   await deps.queue.send(queueName, job, { id });
   return { captured: true, id };
 }
 
-export function acceptTask(deps: AcceptDeps, agent: AuthenticatedAgent, input: LogTaskInput) {
+export function acceptTask(
+  deps: AcceptDeps,
+  agent: AuthenticatedAgent,
+  input: LogTaskInput,
+  source: IngestSource = "mcp",
+) {
   const id = input.idempotency_key
     ? idFromKey([agent.tenantId, agent.memberId, "task", input.idempotency_key])
     : randomUUID();
-  return accept(deps, agent, "task", "ingest.task", id, input);
+  return accept(deps, agent, "task", "ingest.task", id, input, source);
 }
 
 export function acceptOutcome(
   deps: AcceptDeps,
   agent: AuthenticatedAgent,
   input: ReportOutcomeInput,
+  source: IngestSource = "mcp",
 ) {
   const id = input.idempotency_key
     ? idFromKey([agent.tenantId, agent.memberId, "outcome", input.idempotency_key])
     : randomUUID();
-  return accept(deps, agent, "outcome", "ingest.outcome", id, input);
+  return accept(deps, agent, "outcome", "ingest.outcome", id, input, source);
 }
 
 export function acceptActions(
   deps: AcceptDeps,
   agent: AuthenticatedAgent,
   input: ActionBatchInput,
+  source: IngestSource = "mcp",
 ) {
   // Event ids are client-generated, so the batch id derives from them: a resent batch dedupes.
   const id = idFromKey([
@@ -117,5 +130,5 @@ export function acceptActions(
     "actions",
     ...input.events.map((e) => e.id),
   ]);
-  return accept(deps, agent, "actions", "ingest.actions", id, input);
+  return accept(deps, agent, "actions", "ingest.actions", id, input, source);
 }

@@ -89,6 +89,12 @@ async function seedTenant(slug: string) {
     await tx.execute(sql`
       INSERT INTO action_events (tenant_id, id, session_id, member_id, kind, summary_redacted, occurred_at)
       VALUES (${t.tenantId}, gen_random_uuid(), ${session!.id}, ${member.id}, 'edit', 'seed', now())`);
+    await tx.execute(sql`
+      INSERT INTO lake_outbox (tenant_id, member_id, lake_table, event_id, row)
+      VALUES (${t.tenantId}, ${member.id}, 'tasks', ${taskId}, '{}')`);
+    await tx.execute(sql`
+      INSERT INTO erasure_requests (tenant_id, subject_member_id, requested_by_member_id)
+      VALUES (${t.tenantId}, gen_random_uuid(), ${t.adminMemberId})`);
     return {
       tenantId: t.tenantId,
       teamId: team!.id,
@@ -286,7 +292,7 @@ describe("agent keys", () => {
       tenantId: A.tenantId,
       agentId: A.agentId,
       memberId: A.memberId,
-      scopes: ["capture:write"],
+      scopes: ["capture:write", "history:read"],
       captureOptOut: false,
     });
     expect((await db.system.authenticateAgent(B.agentKey))?.tenantId).toBe(B.tenantId);

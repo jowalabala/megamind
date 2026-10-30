@@ -20,6 +20,13 @@ export interface Redactor {
 const PLACEHOLDER_RE =
   /\[(?:SECRET|PERSON|EMAIL|PHONE|CARD|SSN|IBAN|IP|NAME|ADDRESS|ID|PII)(?::[\w-]+)?\]/g;
 
+/** Drops detections that touch one of our own placeholders, so redaction is idempotent. */
+function outsidePlaceholders(text: string, detections: Detection[]): Detection[] {
+  const spans = [...text.matchAll(PLACEHOLDER_RE)].map((m) => [m.index, m.index + m[0].length]);
+  if (spans.length === 0) return detections;
+  return detections.filter((d) => spans.every(([s, e]) => d.end <= s! || d.start >= e!));
+}
+
 // Secrets beat people, people beat generic PII; then the longer span wins.
 const priority = (d: Detection) => (d.category === "secret" ? 3 : d.label === "person" ? 2 : 1);
 
@@ -68,9 +75,13 @@ export function createRedactor(options: RedactorOptions = {}): Redactor {
 
   function redactSync(text: string): RedactionResult {
     if (!text) return { text, counts: {} };
+    // Text redacted earlier (e.g. by the bridge) keeps its placeholders as they are.
     return applyDetections(
       text,
-      detectors.flatMap((d) => d.detect(text)),
+      outsidePlaceholders(
+        text,
+        detectors.flatMap((d) => d.detect(text)),
+      ),
     );
   }
 
@@ -78,14 +89,7 @@ export function createRedactor(options: RedactorOptions = {}): Redactor {
     const first = redactSync(text);
     if (!options.external || !first.text) return first;
     const found = await options.external.detect(first.text);
-    // Never re-redact our own placeholders.
-    const protectedSpans = [...first.text.matchAll(PLACEHOLDER_RE)].map((m) => [
-      m.index,
-      m.index + m[0].length,
-    ]);
-    const fresh = found.filter((d) =>
-      protectedSpans.every(([s, e]) => d.end <= s! || d.start >= e!),
-    );
+    const fresh = outsidePlaceholders(first.text, found);
     const second = applyDetections(first.text, fresh);
     return { text: second.text, counts: mergeCounts(first.counts, second.counts) };
   }

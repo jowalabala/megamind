@@ -8,10 +8,12 @@ export {
   type AcceptResult,
   type BronzeEnvelope,
   type IngestJob,
+  type IngestSource,
 } from "./accept.ts";
 export {
   bronzeKey,
   fileBronze,
+  memberBronzePrefix,
   memoryBronze,
   s3Bronze,
   type BronzeKind,

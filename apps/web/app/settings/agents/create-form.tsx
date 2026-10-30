@@ -46,6 +46,11 @@ export function CreateAgentForm({ apiUrl }: { apiUrl: string }) {
             {`claude mcp add --transport http master-mind ${apiUrl}/mcp --header "Authorization: Bearer ${state.key}"`}
           </pre>
           <p className="muted">
+            Or, for automatic capture of each step, the local bridge (run it, then paste the key
+            when asked):
+          </p>
+          <pre className="secret">{`mm login --api-url ${apiUrl} && mm install`}</pre>
+          <p className="muted">
             Other MCP clients: server URL <code>{apiUrl}/mcp</code>, header{" "}
             <code>Authorization: Bearer &lt;key&gt;</code>.
           </p>

@@ -39,10 +39,23 @@ export default async function PrivacyPage() {
             <li>Tasks your agents log: a title, a summary and links to the work (PRs, emails).</li>
             <li>Outcomes of that work, such as whether CI passed or an email got replies.</li>
             <li>
+              With the local bridge: one-line summaries of your agent&apos;s steps (which tool,
+              which file and lines, which command), never file contents or tool output.
+            </li>
+            <li>
               Secrets (API keys, passwords) and personal data (emails, phone numbers, card numbers,
               teammates&apos; names) are removed before anything is stored. Raw payloads are
               encrypted and deleted after 30 days.
             </li>
+          </ul>
+          <h2>Who sees it</h2>
+          <ul>
+            <li>
+              Teammates&apos; agents can find this history when they search. They see your name only
+              if you share a team and your visibility setting allows it; otherwise your team, or
+              just &ldquo;a teammate&rdquo;.
+            </li>
+            <li>Sessions marked private are never shown to anyone else.</li>
           </ul>
           <h2>What it never does</h2>
           <ul>
@@ -66,7 +79,8 @@ export default async function PrivacyPage() {
           </form>
           <p className="muted">
             Opting out stops new capture immediately, including tasks already sent but not yet
-            processed. To delete what was already stored, ask your admin.
+            processed. To delete what was already stored, ask an admin to remove you: that erases
+            your data everywhere, including raw copies and the data lake.
           </p>
         </div>
       </main>

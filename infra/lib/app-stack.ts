@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Duration, IgnoreMode, Stack, type StackProps } from "aws-cdk-lib";
+import { CfnOutput, Duration, IgnoreMode, Stack, type StackProps } from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as ecsPatterns from "aws-cdk-lib/aws-ecs-patterns";
@@ -21,6 +21,13 @@ export interface AppStackProps extends StackProps {
   dbSecurityGroup: ec2.ISecurityGroup;
   appDbSecret: secretsmanager.ISecret;
   bronzeBucket: s3.IBucket;
+  lake: {
+    streamName: string;
+    streamArn: string;
+    tableBucketArn: string;
+    /** Per-tenant query roles live under this path (created by the provisioning CLI). */
+    tenantRolePathArn: string;
+  };
 }
 
 /** Bronze object keys all start with this prefix (see packages/ingest/src/bronze.ts). */
@@ -157,7 +164,14 @@ export class AppStack extends Stack {
     workerTask.addContainer("worker", {
       image: servicesImage,
       command: ["node", "--enable-source-maps", "worker/main.js"],
-      environment: { ...sharedEnv, MM_PII_COMPREHEND: "on", AWS_REGION: this.region },
+      environment: {
+        ...sharedEnv,
+        MM_PII_COMPREHEND: "on",
+        AWS_REGION: this.region,
+        MM_STAGE: cfg.stage,
+        MM_LAKE_FIREHOSE_STREAM: props.lake.streamName,
+        MM_LAKE_TABLE_BUCKET_ARN: props.lake.tableBucketArn,
+      },
       secrets: {
         ...dbSecrets,
         MM_PSEUDONYM_SECRET: ecs.Secret.fromSecretsManager(pseudonymSecret),
@@ -167,9 +181,24 @@ export class AppStack extends Stack {
         logRetention: logs.RetentionDays.ONE_YEAR,
       }),
     });
-    // The worker reads raw payloads, and deletes them when a member has opted out.
+    // The worker reads raw payloads, and deletes them when a member opts out or is erased.
     props.bronzeBucket.grantRead(workerTask.taskRole, BRONZE_PREFIX);
     props.bronzeBucket.grantDelete(workerTask.taskRole, BRONZE_PREFIX);
+    // Lake: publish to the stream; query and erase only by assuming one tenant's role.
+    workerTask.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ["firehose:PutRecordBatch"],
+        resources: [props.lake.streamArn],
+      }),
+    );
+    workerTask.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ["sts:AssumeRole"],
+        resources: [props.lake.tenantRolePathArn],
+      }),
+    );
+    // The provisioning CLI puts this in each tenant role's trust policy.
+    new CfnOutput(this, "LakeTrustedRoleArns", { value: workerTask.taskRole.roleArn });
     workerTask.taskRole.addToPrincipalPolicy(
       new iam.PolicyStatement({
         // DetectPiiEntities has no resource-level permissions.

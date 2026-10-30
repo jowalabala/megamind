@@ -25,6 +25,21 @@ describe("redact", () => {
     expect(r.redactSync(text)).toEqual({ text, counts: {} });
   });
 
+  it("is idempotent: placeholders from an earlier pass (e.g. the bridge) are left alone", () => {
+    const token = fake("stripe_key");
+    const samples = [
+      `STRIPE_KEY=${token} pnpm test`,
+      `export SECRET=${fake("aws_secret")}`,
+      `token ${fake("github_token")} from jane@example.com, call +1 415 555 0134`,
+      `password: "${fake("password")}"`,
+    ];
+    for (const s of samples) {
+      const once = r.redactSync(s).text;
+      expect(r.redactSync(once)).toEqual({ text: once, counts: {} });
+    }
+    expect(r.redactSync(`STRIPE_KEY=${token}`).text).toBe("STRIPE_KEY=[SECRET:stripe_key]");
+  });
+
   it("finishes quickly on large adversarial input", () => {
     const evil = "password=" + "a".repeat(50_000) + " " + "1-".repeat(50_000) + "@".repeat(20_000);
     const t0 = performance.now();

@@ -7,6 +7,7 @@ import {
   createDb,
   eq,
   externalRefs,
+  lakeOutbox,
   memberRepo,
   metricObservations,
   tasks,
@@ -118,7 +119,18 @@ describe("log_task", () => {
     const job = lastJob();
     // The queued job carries pointers only.
     expect(JSON.stringify(job)).not.toContain(GITHUB_TOKEN);
-    expect(Object.keys(job).sort()).toEqual(["agentId", "bronzeKey", "id", "memberId", "tenantId"]);
+    expect(Object.keys(job).sort()).toEqual([
+      "agentId",
+      "bronzeKey",
+      "id",
+      "memberId",
+      "source",
+      "tenantId",
+    ]);
+    // Raw payloads are filed per member, so one member's can be erased alone.
+    expect(job.bronzeKey).toMatch(
+      new RegExp(`^raw/tenant=${tenantId}/member=${dana.memberId}/kind=task/dt=`),
+    );
 
     expect(await processTask(process, job)).toBe("stored");
     const [task] = await db.withTenant(tenantId, (tx) =>
@@ -152,10 +164,25 @@ describe("log_task", () => {
       `SELECT count(*)::int AS n FROM (
          SELECT title_redacted || summary_redacted AS t FROM tasks
          UNION ALL SELECT content_redacted FROM artifacts
+         UNION ALL SELECT row::text FROM lake_outbox
          UNION ALL SELECT data::text FROM pgboss.job) x WHERE t LIKE $1`,
       [`%${GITHUB_TOKEN}%`],
     );
     expect(rows[0]!.n).toBe(0);
+
+    // The lake copy was written in the same transaction, from the redacted values.
+    const [outbox] = await db.withTenant(tenantId, (tx) =>
+      tx.select().from(lakeOutbox).where(eq(lakeOutbox.eventId, job.id)),
+    );
+    expect(outbox).toMatchObject({ lakeTable: "tasks", memberId: dana.memberId });
+    expect(outbox!.row).toMatchObject({
+      event_id: job.id,
+      member_id: dana.memberId,
+      title: "Fix proration for [EMAIL]",
+      external_refs: JSON.stringify(["github:pr:acme/api#482"]),
+      source: "mcp",
+      private: false,
+    });
   });
 
   it("drops an opted-out member's task before storing anything", async () => {
@@ -191,6 +218,14 @@ describe("log_task", () => {
     // Even if a duplicate job did run, it would be a no-op.
     expect(await processTask(process, lastJob())).toBe("stored");
     expect(await processTask(process, lastJob())).toBe("duplicate");
+    // A duplicate never reaches the lake twice.
+    const copies = await db.withTenant(tenantId, (tx) =>
+      tx
+        .select()
+        .from(lakeOutbox)
+        .where(eq(lakeOutbox.eventId, a.captured ? a.id : "")),
+    );
+    expect(copies).toHaveLength(1);
     // The same key from a different member is a different task.
     const c = await acceptTask(accept, lior, input);
     expect(c).not.toEqual(a);
@@ -283,9 +318,15 @@ describe("actions", () => {
         },
       ],
     });
-    await acceptActions(accept, dana, input);
+    await acceptActions(accept, dana, input, "bridge");
     expect(await processActions(process, lastJob())).toBe("stored");
     expect(await processActions(process, lastJob())).toBe("duplicate");
+    const lakeRows = await db.withTenant(tenantId, (tx) =>
+      tx.select().from(lakeOutbox).where(eq(lakeOutbox.lakeTable, "actions")),
+    );
+    expect(lakeRows).toHaveLength(2);
+    expect(lakeRows.every((r) => r.row.source === "bridge")).toBe(true);
+    expect(JSON.stringify(lakeRows)).not.toContain(GITHUB_TOKEN);
     const rows = await db.withTenant(tenantId, (tx) =>
       tx.select().from(actionEvents).where(eq(actionEvents.memberId, dana.memberId)),
     );
@@ -295,5 +336,6 @@ describe("actions", () => {
     expect(edit.resources).toEqual(["git:github.com/acme/api:src/billing/invoice.ts#L40-90"]);
     // The unknown task id was dropped rather than failing the batch.
     expect(edit.taskId).toBeNull();
+    expect(edit.source).toBe("bridge");
   });
 });

@@ -1,0 +1,20 @@
+// Plain constants shared with packages that must not pull in Postgres (the bridge, MCP tools).
+export const AGENT_KINDS = [
+  "claude_code",
+  "cursor",
+  "chatgpt",
+  "copilot",
+  "custom",
+  "bridge",
+] as const;
+
+export const AGENT_SCOPES = ["capture:write", "history:read", "skills:read", "collab"] as const;
+export type AgentScope = (typeof AGENT_SCOPES)[number];
+/** What a new key gets unless the creator picks otherwise. */
+export const DEFAULT_AGENT_SCOPES: AgentScope[] = ["capture:write", "history:read"];
+
+export const ARTIFACT_KINDS = ["text", "diff", "email", "document", "link", "other"] as const;
+
+/** Where captured data came from. Mirrors the capture_source enum. */
+export const CAPTURE_SOURCES = ["mcp", "bridge", "github", "hubspot", "csv", "ui"] as const;
+export type CaptureSource = (typeof CAPTURE_SOURCES)[number];

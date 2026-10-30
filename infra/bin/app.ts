@@ -2,6 +2,7 @@ import { App, Tags } from "aws-cdk-lib";
 import { AppStack } from "../lib/app-stack.ts";
 import { stageConfig } from "../lib/config.ts";
 import { DataStack } from "../lib/data-stack.ts";
+import { LakeStack } from "../lib/lake-stack.ts";
 import { NetworkStack } from "../lib/network-stack.ts";
 
 const app = new App();
@@ -14,6 +15,7 @@ const prefix = `MasterMind-${cfg.stage}`;
 
 const network = new NetworkStack(app, `${prefix}-Network`, cfg, { env });
 const data = new DataStack(app, `${prefix}-Data`, cfg, { env, vpc: network.vpc });
+const lake = new LakeStack(app, `${prefix}-Lake`, cfg, { env });
 new AppStack(app, `${prefix}-App`, cfg, {
   env,
   vpc: network.vpc,
@@ -21,6 +23,12 @@ new AppStack(app, `${prefix}-App`, cfg, {
   dbSecurityGroup: data.dbSecurityGroup,
   appDbSecret: data.appDbSecret,
   bronzeBucket: data.bronzeBucket,
+  lake: {
+    streamName: lake.streamName,
+    streamArn: lake.streamArn,
+    tableBucketArn: lake.tableBucketArn,
+    tenantRolePathArn: lake.tenantRolePathArn,
+  },
 });
 
 Tags.of(app).add("project", "master-mind");

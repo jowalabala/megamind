@@ -63,6 +63,11 @@ export interface MasterMindDb {
     resolveTenantByWorkosOrg(workosOrgId: string): Promise<string | null>;
     /** Resolves an agent API key. Null for malformed, unknown or revoked keys. */
     authenticateAgent(key: string): Promise<AuthenticatedAgent | null>;
+    /**
+     * Every tenant id, for background jobs that then work inside each tenant's context.
+     * `lakeReady` is true once the tenant's lake namespace has been provisioned.
+     */
+    listTenantsForJobs(): Promise<{ tenantId: string; lakeReady: boolean }[]>;
   };
   /** Readiness check. Also reports any tenant context on a pooled connection, which must always be null. */
   health(): Promise<{ ok: true; leakedTenantContext: string | null }>;
@@ -142,6 +147,13 @@ export function createDb(options: CreateDbOptions): MasterMindDb {
           scopes: row.scopes,
           captureOptOut: row.capture_opt_out,
         };
+      },
+
+      async listTenantsForJobs() {
+        const res = await db.execute<{ tenant_id: string; lake_ready: boolean }>(
+          sql`SELECT tenant_id, lake_ready FROM mm_list_tenants_for_jobs()`,
+        );
+        return res.rows.map((r) => ({ tenantId: r.tenant_id, lakeReady: r.lake_ready }));
       },
     },
 

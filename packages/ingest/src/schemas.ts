@@ -1,5 +1,5 @@
 // Input contracts for capture. Shared by the MCP tools, the REST API and the bridge.
-import { ARTIFACT_KINDS } from "@mm/db";
+import { ARTIFACT_KINDS } from "@mm/db/constants";
 import { z } from "zod";
 
 const datetime = () => z.iso.datetime({ offset: true });

@@ -15,6 +15,7 @@ import {
   type TenantTx,
 } from "@mm/db";
 import type { QueueClient } from "@mm/db/queue";
+import { actionRecord, enqueueLakeRecords, metricRecord, taskRecord } from "@mm/lake";
 import { mergeCounts, type Redactor } from "@mm/privacy";
 import type { BronzeEnvelope, IngestJob } from "./accept.ts";
 import type { BronzeStore } from "./bronze.ts";
@@ -79,7 +80,7 @@ async function upsertSession(
   job: IngestJob,
   s: SessionInput,
   context: Record<string, unknown>,
-): Promise<string> {
+): Promise<{ id: string; private: boolean }> {
   const [row] = await tx
     .insert(agentSessions)
     .values({
@@ -103,7 +104,7 @@ async function upsertSession(
   if (s.private && !row!.private) {
     await tx.update(agentSessions).set({ private: true }).where(eq(agentSessions.id, row!.id));
   }
-  return row!.id;
+  return { id: row!.id, private: row!.private || !!s.private };
 }
 
 async function dropRaw(deps: ProcessDeps, job: IngestJob, outcome: ProcessOutcome) {
@@ -147,9 +148,15 @@ export async function processTask(deps: ProcessDeps, job: IngestJob): Promise<Pr
   return deps.db.withTenant(job.tenantId, async (tx) => {
     // Checked again inside the write transaction, in case the member opted out meanwhile.
     if (await memberOptedOut(tx, job.memberId)) return "dropped_opt_out" as const;
-    const sessionId = input.session
+    const session_ = input.session
       ? await upsertSession(tx, job, input.session, session!.context)
       : null;
+    const sessionId = session_?.id ?? null;
+    const features = {
+      artifact_kinds: [...new Set(input.artifacts.map((a) => a.kind))].sort(),
+      ref_systems: [...new Set(input.external_refs.map((x) => x.split(":")[0]))].sort(),
+      summary_chars: input.summary.length,
+    };
     const inserted = await tx
       .insert(tasks)
       .values({
@@ -158,22 +165,18 @@ export async function processTask(deps: ProcessDeps, job: IngestJob): Promise<Pr
         memberId: job.memberId,
         agentIdentityId: job.agentId,
         agentSessionId: sessionId,
-        source: "mcp",
+        source: job.source ?? "mcp",
         idempotencyKey: input.idempotency_key ?? null,
         titleRedacted: clip(title.text, 1_000),
         summaryRedacted: clip(summary.text, 40_000),
         categoryHint: hint ? clip(hint.text, 100) : null,
-        features: {
-          artifact_kinds: [...new Set(input.artifacts.map((a) => a.kind))].sort(),
-          ref_systems: [...new Set(input.external_refs.map((x) => x.split(":")[0]))].sort(),
-          summary_chars: input.summary.length,
-        },
+        features,
         redactionCounts: counts,
         startedAt: input.started_at ? new Date(input.started_at) : null,
         completedAt: input.completed_at ? new Date(input.completed_at) : null,
       })
       .onConflictDoNothing()
-      .returning({ id: tasks.id });
+      .returning({ id: tasks.id, createdAt: tasks.createdAt });
     if (inserted.length === 0) return "duplicate" as const;
 
     if (arts.length > 0) {
@@ -197,6 +200,26 @@ export async function processTask(deps: ProcessDeps, job: IngestJob): Promise<Pr
         .values(cleanRefs.map((ref) => ({ tenantId: job.tenantId, taskId: job.id, ref })))
         .onConflictDoNothing();
     }
+    await enqueueLakeRecords(tx, job.tenantId, [
+      taskRecord({
+        id: job.id,
+        tenantId: job.tenantId,
+        memberId: job.memberId,
+        agentId: job.agentId,
+        source: job.source ?? "mcp",
+        sessionId,
+        private: session_?.private ?? false,
+        title: clip(title.text, 1_000),
+        summary: clip(summary.text, 40_000),
+        categoryHint: hint ? clip(hint.text, 100) : null,
+        externalRefs: cleanRefs,
+        features,
+        startedAt: input.started_at ? new Date(input.started_at) : null,
+        completedAt: input.completed_at ? new Date(input.completed_at) : null,
+        createdAt: inserted[0]!.createdAt,
+        ingestedAt: new Date(),
+      }),
+    ]);
     return "stored" as const;
   });
 }
@@ -231,14 +254,31 @@ export async function processOutcome(deps: ProcessDeps, job: IngestJob): Promise
         metricKey: input.metric,
         value: input.value,
         n: input.n,
-        source: "mcp",
+        source: job.source ?? "mcp",
         agentIdentityId: job.agentId,
         noteRedacted: note ? clip(note.text, 4_000) : null,
         observedAt: input.observed_at ? new Date(input.observed_at) : new Date(env.receivedAt),
       })
       .onConflictDoNothing()
-      .returning({ id: metricObservations.id });
-    return inserted.length ? ("stored" as const) : ("duplicate" as const);
+      .returning({ id: metricObservations.id, observedAt: metricObservations.observedAt });
+    if (inserted.length === 0) return "duplicate" as const;
+    await enqueueLakeRecords(tx, job.tenantId, [
+      metricRecord({
+        id: job.id,
+        tenantId: job.tenantId,
+        memberId: job.memberId,
+        agentId: job.agentId,
+        source: job.source ?? "mcp",
+        taskId: input.task_id,
+        metric: input.metric,
+        value: input.value,
+        n: input.n,
+        note: note ? clip(note.text, 4_000) : null,
+        observedAt: inserted[0]!.observedAt,
+        ingestedAt: new Date(),
+      }),
+    ]);
+    return "stored" as const;
   });
 }
 
@@ -261,7 +301,8 @@ export async function processActions(deps: ProcessDeps, job: IngestJob): Promise
 
   return deps.db.withTenant(job.tenantId, async (tx) => {
     if (await memberOptedOut(tx, job.memberId)) return "dropped_opt_out" as const;
-    const sessionId = await upsertSession(tx, job, input.session, session.context);
+    const sess = await upsertSession(tx, job, input.session, session.context);
+    const sessionId = sess.id;
     // Links to tasks that don't exist (or aren't this member's) are dropped, not failed.
     const wanted = [...new Set(events.flatMap((e) => (e.task_id ? [e.task_id] : [])))];
     const known = wanted.length
@@ -287,11 +328,35 @@ export async function processActions(deps: ProcessDeps, job: IngestJob): Promise
           summaryRedacted: clip(e.summary, 4_000),
           resources: e.resources,
           occurredAt: new Date(e.occurred_at),
+          source: job.source ?? "mcp",
         })),
       )
       .onConflictDoNothing()
-      .returning({ id: actionEvents.id });
-    return inserted.length ? ("stored" as const) : ("duplicate" as const);
+      .returning();
+    if (inserted.length === 0) return "duplicate" as const;
+    const now = new Date();
+    await enqueueLakeRecords(
+      tx,
+      job.tenantId,
+      inserted.map((e) =>
+        actionRecord({
+          id: e.id,
+          tenantId: job.tenantId,
+          memberId: job.memberId,
+          agentId: job.agentId,
+          source: e.source,
+          sessionId,
+          taskId: e.taskId,
+          private: sess.private,
+          kind: e.kind,
+          summary: e.summaryRedacted,
+          resources: e.resources,
+          occurredAt: e.occurredAt,
+          ingestedAt: now,
+        }),
+      ),
+    );
+    return "stored" as const;
   });
 }
 
