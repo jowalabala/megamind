@@ -11,7 +11,7 @@ export const AGENT_KINDS = [
 export const AGENT_SCOPES = ["capture:write", "history:read", "skills:read", "collab"] as const;
 export type AgentScope = (typeof AGENT_SCOPES)[number];
 /** What a new key gets unless the creator picks otherwise. */
-export const DEFAULT_AGENT_SCOPES: AgentScope[] = ["capture:write", "history:read"];
+export const DEFAULT_AGENT_SCOPES: AgentScope[] = ["capture:write", "history:read", "collab"];
 
 export const ARTIFACT_KINDS = ["text", "diff", "email", "document", "link", "other"] as const;
 

@@ -96,6 +96,17 @@ server. From then on each tool call becomes a one-line action (tool, file and ch
 command), with secrets removed on your machine, and the agent can call `search_history`.
 `mm status` shows what's set up; `mm uninstall` removes it.
 
+### Live presence
+
+```bash
+pnpm dev:gateway
+```
+
+Set `MM_GATEWAY_SECRET` (shared by API and gateway) and `MM_GATEWAY_URL=ws://localhost:4200` in
+`.env.local`. With the bridge installed, each Claude Code session shows up live to teammates, and
+agents are told who else is working when that changes. See
+[ADR 0006](docs/adr/0006-presence-and-skill-drafts.md).
+
 ### How capture flows
 
 Agent → `log_task` (MCP) or a bridge hook → API checks the key and the member's opt-out, stores the
@@ -164,6 +175,16 @@ pnpm --filter @mm/backtest label-agreement <tenant-id> labels.csv
 
 The second compares hand labels (`repo,number,reverted,escaped_defect,ci_first_pass,verdict`)
 with the system's; the bar is 85%.
+
+### Skill drafts
+
+```bash
+pnpm --filter @mm/skills draft <tenant-id> --train-end 2026-07-01
+```
+
+Builds cohorts of successful and comparable unsuccessful work per category from the lake's
+training window, and asks Claude Sonnet (Bedrock) for one skill per cohort. Every step cites the
+PRs it came from. Drafts are stored for review.
 
 ### Removing a member
 

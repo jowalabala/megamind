@@ -189,11 +189,27 @@ describe("app stack (api, worker, web)", () => {
     expect(secretsOf("worker")).toEqual(["MM_GITHUB_APP_ID", "MM_GITHUB_PRIVATE_KEY"]);
   });
 
-  it("web, api and worker each get their own Postgres ingress rule, nothing else", () => {
+  it("web, api, gateway and worker each get their own Postgres ingress rule, nothing else", () => {
     const rules = Object.values(t.findResources("AWS::EC2::SecurityGroupIngress")).filter(
       (r) => (r as { Properties: { FromPort: number } }).Properties.FromPort === 5432,
     );
-    expect(rules).toHaveLength(3);
+    expect(rules).toHaveLength(4);
+  });
+
+  it("routes /ws to the gateway, which shares only its token secret with the API", () => {
+    t.hasResourceProperties("AWS::ElasticLoadBalancingV2::ListenerRule", {
+      Priority: 9,
+      Conditions: [{ Field: "path-pattern", PathPatternConfig: { Values: ["/ws"] } }],
+    });
+    const defs = Object.values(t.findResources("AWS::ECS::TaskDefinition")) as {
+      Properties: { ContainerDefinitions: { Name: string; Secrets?: { Name: string }[] }[] };
+    }[];
+    const holders = defs
+      .flatMap((d) => d.Properties.ContainerDefinitions)
+      .filter((c) => c.Secrets?.some((x) => x.Name === "MM_GATEWAY_SECRET"))
+      .map((c) => c.Name)
+      .sort();
+    expect(holders).toEqual(["api", "gateway"]);
   });
 
   it("the pseudonym secret is generated, not typed in", () => {

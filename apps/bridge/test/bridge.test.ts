@@ -137,6 +137,7 @@ describe("planInstall", () => {
       "SessionEnd",
       "SessionStart",
       "Stop",
+      "UserPromptSubmit",
     ]);
     // A new install path replaces the old one rather than adding a second set.
     const moved = planInstall(once, '"/usr/bin/node" "/opt/mm/dist/mm.js"');

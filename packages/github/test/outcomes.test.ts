@@ -22,6 +22,7 @@ import { tenantRedactors } from "@mm/ingest";
 import { localLake, publishOutbox } from "@mm/lake";
 import type { Llm } from "@mm/llm";
 import { builtinPacks, categorizeTask, judge, judgeSweep, replayJudgments } from "@mm/packs";
+import { draftSkills, type Cohort } from "@mm/skills";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   backfillRepoPage,
@@ -310,5 +311,71 @@ describe("backtest v0 from the lake", () => {
     // Same lake, same report.
     expect(await buildReport(lake, tenantId, { trainEnd, minGroup: 3 })).toEqual(report);
     expect(prTaskId(tenantId, BILLING_REPO.id, 12)).toBeTruthy();
+  });
+});
+
+describe("week 6 check: the backtest training window produces skill drafts", () => {
+  it("builds cohorts from the lake and stores grounded drafts", async () => {
+    // Everything judged so far (the most recent judged PR merged 69 days ago).
+    const trainEnd = new Date(Date.now() - 60 * 86_400_000);
+    const seen: Cohort[] = [];
+    // A stand-in for Sonnet that cites what it was shown (plus one made-up ref).
+    const sonnet = {
+      run: async (_p: unknown, c: Cohort) => {
+        seen.push(c);
+        const s = c.success.map((t) => t.ref);
+        return {
+          title: `Practice for ${c.category}`,
+          when_to_use: `When doing ${c.category} work`,
+          preconditions: [],
+          steps: [
+            { text: "Keep the change focused", evidence: s.slice(0, 3) },
+            { text: "Get CI green before review", evidence: [...s.slice(3, 5), "S99"] },
+          ],
+          anti_patterns: c.failure.length
+            ? [{ text: "Large mixed changes", evidence: [c.failure[0]!.ref] }]
+            : [],
+          expected_outcome: "Fewer reverts",
+          no_clear_practice: false,
+        };
+      },
+    } as unknown as Llm;
+
+    const outcomes = await draftSkills({ db, lake, llm: sonnet }, tenantId, { trainEnd });
+    expect(outcomes.some((o) => o.result === "drafted")).toBe(true);
+    const feature = outcomes.find((o) => o.category === "feature")!;
+    expect(feature).toMatchObject({ result: "drafted", droppedCitations: 1 });
+    expect(feature.successes).toBeGreaterThanOrEqual(5);
+
+    // Every cohort task finished inside the training window.
+    for (const c of seen) {
+      for (const t of [...c.success, ...c.failure]) {
+        expect(Date.parse(t.completedAt)).toBeLessThan(trainEnd.getTime());
+      }
+    }
+    // Stored, with evidence that points at real successful PRs in the cohort.
+    const [draft] = await db
+      .withTenant(tenantId, (t) =>
+        t.execute<{
+          body: { steps: { evidence: string[] }[] };
+          cohort: { success: string[] };
+          title: string;
+        }>(sql`
+        SELECT body, cohort, title FROM skill_drafts WHERE category = 'feature'`),
+      )
+      .then((r) => r.rows);
+    expect(draft!.title).toBe("Practice for feature");
+    for (const step of draft!.body.steps) {
+      for (const id of step.evidence) expect(draft!.cohort.success).toContain(id);
+    }
+    const verdicts = await db.withTenant(tenantId, (t) =>
+      t.execute<{ verdict: string }>(sql`
+        SELECT verdict FROM judgments WHERE task_id = ANY(${sql.raw(`ARRAY[${draft!.body.steps[0]!.evidence.map((e) => `'${e}'`).join(",")}]::uuid[]`)})`),
+    );
+    expect(verdicts.rows.every((v) => v.verdict === "success")).toBe(true);
+
+    // Same window, same prompt: nothing new.
+    const again = await draftSkills({ db, lake, llm: sonnet }, tenantId, { trainEnd });
+    expect(again.filter((o) => o.result === "drafted")).toEqual([]);
   });
 });

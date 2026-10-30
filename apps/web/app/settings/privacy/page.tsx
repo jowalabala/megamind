@@ -60,6 +60,10 @@ export default async function PrivacyPage() {
               if you share a team and your visibility setting allows it; otherwise your team, or
               just &ldquo;a teammate&rdquo;.
             </li>
+            <li>
+              While your agent is working, teammates see that it&apos;s active (the tool and the
+              repository; the branch only within your team), and nothing about how long or how much.
+            </li>
             <li>Sessions marked private are never shown to anyone else.</li>
           </ul>
           <h2>What it never does</h2>

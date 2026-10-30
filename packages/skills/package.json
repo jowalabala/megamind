@@ -1,0 +1,23 @@
+{
+  "name": "@mm/skills",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "draft": "tsx src/cli/draft.ts"
+  },
+  "dependencies": {
+    "@mm/db": "workspace:*",
+    "@mm/lake": "workspace:*",
+    "@mm/llm": "workspace:*",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0"
+  }
+}

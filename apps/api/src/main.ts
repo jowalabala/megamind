@@ -23,6 +23,8 @@ const app = await buildApp({
   queue,
   bronze,
   githubWebhookSecret: process.env.MM_GITHUB_WEBHOOK_SECRET || undefined,
+  gatewaySecret: process.env.MM_GATEWAY_SECRET || undefined,
+  gatewayUrl: process.env.MM_GATEWAY_URL || undefined,
   logger: { level: process.env.LOG_LEVEL ?? "info" },
 });
 

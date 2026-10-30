@@ -122,6 +122,13 @@ export class AppStack extends Stack {
       generateSecretString: { excludePunctuation: true, passwordLength: 64 },
     });
 
+    // Signs the 5-minute tokens the API gives agents for the real-time gateway.
+    const gatewaySecret = new secretsmanager.Secret(this, "GatewaySecret", {
+      secretName: `mastermind/${cfg.stage}/gateway`,
+      description: "Shared by the API and the gateway to sign WebSocket tokens",
+      generateSecretString: { excludePunctuation: true, passwordLength: 64 },
+    });
+
     const servicesImage = ecs.ContainerImage.fromAsset(REPO_ROOT, {
       file: "apps/api/Dockerfile",
       ignoreMode: IgnoreMode.DOCKER,
@@ -147,10 +154,15 @@ export class AppStack extends Stack {
       image: servicesImage,
       command: ["node", "--enable-source-maps", "api/main.js"],
       portMappings: [{ containerPort: 4000 }],
-      environment: sharedEnv,
+      environment: {
+        ...sharedEnv,
+        // TODO(before pilot): wss:// once the HTTPS listener exists (same as the web app).
+        MM_GATEWAY_URL: `ws://${web.loadBalancer.loadBalancerDnsName}`,
+      },
       secrets: {
         ...dbSecrets,
         MM_GITHUB_WEBHOOK_SECRET: ecs.Secret.fromSecretsManager(githubWebhook, "WEBHOOK_SECRET"),
+        MM_GATEWAY_SECRET: ecs.Secret.fromSecretsManager(gatewaySecret),
       },
       logging: ecs.LogDrivers.awsLogs({
         streamPrefix: "api",
@@ -175,6 +187,44 @@ export class AppStack extends Stack {
       port: 4000,
       protocol: elbv2.ApplicationProtocol.HTTP,
       targets: [api],
+      healthCheck: { path: "/healthz", interval: Duration.seconds(30) },
+      deregistrationDelay: Duration.seconds(30),
+    });
+
+    // Real-time gateway: WebSockets on /ws, same load balancer.
+    const gatewayTask = new ecs.FargateTaskDefinition(this, "GatewayTask", {
+      cpu: 256,
+      memoryLimitMiB: 512,
+    });
+    gatewayTask.addContainer("gateway", {
+      image: servicesImage,
+      command: ["node", "--enable-source-maps", "gateway/main.js"],
+      portMappings: [{ containerPort: 4200 }],
+      environment: { ...sharedEnv, PORT: "4200" },
+      secrets: {
+        ...dbSecrets,
+        MM_GATEWAY_SECRET: ecs.Secret.fromSecretsManager(gatewaySecret),
+        MM_PSEUDONYM_SECRET: ecs.Secret.fromSecretsManager(pseudonymSecret),
+      },
+      logging: ecs.LogDrivers.awsLogs({
+        streamPrefix: "gateway",
+        logRetention: logs.RetentionDays.ONE_YEAR,
+      }),
+    });
+    const gateway = new ecs.FargateService(this, "Gateway", {
+      cluster,
+      taskDefinition: gatewayTask,
+      desiredCount: cfg.gatewayDesiredCount,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      circuitBreaker: { rollback: true },
+      minHealthyPercent: 100,
+    });
+    web.listener.addTargets("GatewayTargets", {
+      priority: 9,
+      conditions: [elbv2.ListenerCondition.pathPatterns(["/ws"])],
+      port: 4200,
+      protocol: elbv2.ApplicationProtocol.HTTP,
+      targets: [gateway],
       healthCheck: { path: "/healthz", interval: Duration.seconds(30) },
       deregistrationDelay: Duration.seconds(30),
     });
@@ -244,6 +294,7 @@ export class AppStack extends Stack {
     const toPostgres: [string, ecs.FargateService][] = [
       ["Web", web.service],
       ["Api", api],
+      ["Gateway", gateway],
       ["Worker", worker],
     ];
     for (const [name, service] of toPostgres) {

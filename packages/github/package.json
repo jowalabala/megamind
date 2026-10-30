@@ -20,6 +20,7 @@
     "@mm/backtest": "workspace:*",
     "@mm/llm": "workspace:*",
     "@mm/packs": "workspace:*",
+    "@mm/skills": "workspace:*",
     "@types/pg": "^8.15.0",
     "pg": "^8.16.0"
   }

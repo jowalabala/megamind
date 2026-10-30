@@ -1,6 +1,7 @@
 // `mm mcp`: a local stdio MCP server for Claude Code and other IDE agents. Same tools as
 // the remote server; secrets are stripped here before anything is sent.
 import {
+  registerAwarenessTools,
   registerCaptureTools,
   registerHistoryTools,
   SERVER_INFO,
@@ -9,6 +10,7 @@ import {
   type CaptureResult,
   type SearchHistoryResult,
 } from "@mm/mcp";
+import type { PresenceEntry } from "@mm/realtime";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ApiError, createApi, type Api } from "./api.ts";
@@ -65,6 +67,9 @@ export function createBridgeServer(): McpServer {
       call(async (api) =>
         toCapture(await api.post<Accepted>("/v1/outcomes", { ...input, note: keep(input.note) })),
       ),
+  });
+  registerAwarenessTools(server, {
+    whatsHappening: () => call((api) => api.get<{ sessions: PresenceEntry[] }>("/v1/presence")),
   });
   registerHistoryTools(server, {
     searchHistory: (input) =>

@@ -19,6 +19,47 @@ import {
 
 export * from "./history.ts";
 
+import { presenceEntry, type PresenceEntry } from "@mm/realtime";
+
+export interface AwarenessHandlers {
+  whatsHappening(): Promise<{ sessions: PresenceEntry[] }>;
+}
+
+export function formatPresence(sessions: PresenceEntry[]): string {
+  const others = sessions.filter((s) => !s.you);
+  if (others.length === 0) return "Nobody else on the team has an agent session active right now.";
+  return [
+    `${others.length} other active session(s):`,
+    ...others.map(
+      (s) =>
+        `- ${s.who}: ${s.tool ?? "agent"}${s.repo ? ` in ${s.repo}` : ""}${s.branch ? ` (branch ${s.branch})` : ""}, since ${s.since.slice(11, 16)} UTC`,
+    ),
+  ].join("\n");
+}
+
+export function registerAwarenessTools(server: McpServer, handlers: AwarenessHandlers): void {
+  server.registerTool(
+    "whats_happening",
+    {
+      title: "Who else is working right now",
+      description:
+        "Lists teammates' agent sessions active right now (tool, repository, and branch for your own team). " +
+        "Check it before starting work in a shared area, to avoid working on the same thing at once.",
+      inputSchema: z.object({}),
+      outputSchema: z.object({ sessions: z.array(presenceEntry) }),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    () =>
+      guarded(async () => {
+        const result = await handlers.whatsHappening();
+        return {
+          content: [{ type: "text", text: formatPresence(result.sessions) }],
+          structuredContent: result,
+        };
+      }),
+  );
+}
+
 export const SERVER_INFO = { name: "master-mind", version: "0.3.0" };
 
 export const SERVER_INSTRUCTIONS = `Master Mind is your team's shared memory of what work was done and what worked.

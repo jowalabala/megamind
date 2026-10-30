@@ -9,6 +9,7 @@
     "./constants": "./src/constants.ts",
     "./testing": "./src/testing.ts",
     "./migrate": "./src/migrate.ts",
+    "./notify": "./src/notify.ts",
     "./queue": "./src/queue.ts"
   },
   "scripts": {

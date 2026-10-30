@@ -5,6 +5,8 @@ import { availableStore, deleteKey, loadKey, saveKey } from "./credentials.ts";
 import { HOOK_EVENTS, runHook, type HookName } from "./hooks.ts";
 import { hooksInstalled, install, uninstall } from "./install.ts";
 import { runMcpServer } from "./mcp.ts";
+import { repoInfo } from "./git.ts";
+import { runPresence } from "./presence.ts";
 import { flush, pendingCount } from "./spool.ts";
 
 const HELP = `mm ${VERSION} - Master Mind local bridge
@@ -74,6 +76,29 @@ async function main(argv: string[]): Promise<number> {
     case "mcp":
       await runMcpServer();
       return -1; // keep running
+    case "presence": {
+      // Started in the background by the SessionStart hook.
+      const [sessionId, cwd] = args;
+      const cfg = readConfig();
+      const key = cfg && loadKey(cfg.apiUrl);
+      if (!sessionId || !cfg || !key) return 0;
+      const api = createApi(cfg.apiUrl, key.key);
+      const info = repoInfo(cwd ?? process.cwd());
+      await runPresence({
+        sessionId,
+        session: { repo: info?.repo, branch: info?.branch ?? undefined, tool: "claude_code" },
+        getToken: async () => {
+          const t = await api.post<{ token: string; gateway_url: string }>(
+            "/v1/gateway/token",
+            {},
+            5_000,
+          );
+          return { token: t.token, gatewayUrl: t.gateway_url };
+        },
+        log: (m) => logError("presence", new Error(m)),
+      });
+      return 0;
+    }
     case "login": {
       const apiUrl = flag(args, "--api-url") ?? readConfig()?.apiUrl ?? process.env.MM_API_URL;
       if (!apiUrl) {
@@ -88,7 +113,9 @@ async function main(argv: string[]): Promise<number> {
         writeConfig({ apiUrl });
         const store = saveKey(apiUrl, key);
         console.log(
-          `Logged in. Key stored in ${store === "file" ? "~/.mastermind/credentials (no keychain found)" : store}.`,
+          store === "file"
+            ? "Logged in. Key stored in a file only you can read (no OS keychain in use)."
+            : `Logged in. Key stored in ${store}.`,
         );
         console.log(`Scopes: ${me.scopes.join(", ")}`);
         if (me.capture_opt_out)

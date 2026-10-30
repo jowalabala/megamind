@@ -5,10 +5,12 @@ import { toActionEvent, type HookPayload } from "./capture.ts";
 import { logError, readConfig } from "./config.ts";
 import { loadKey } from "./credentials.ts";
 import { repoInfo } from "./git.ts";
+import { presenceContext, requestStop, startPresenceDaemon, touchAlive } from "./presence.ts";
 import { append, flush, flushDue } from "./spool.ts";
 
 export const HOOK_EVENTS = {
   "session-start": "SessionStart",
+  "user-prompt-submit": "UserPromptSubmit",
   "post-tool-use": "PostToolUse",
   stop: "Stop",
   "session-end": "SessionEnd",
@@ -19,8 +21,15 @@ const CONTEXT = [
   "Master Mind is on for this session. Your tool use is captured as short summaries",
   "(secrets are removed on this machine first) so the team can learn what works.",
   "Before non-trivial work, call the master-mind search_history tool to see related past work",
-  "and how it turned out. When you finish a meaningful task, call log_task.",
+  "and how it turned out; whats_happening shows teammates' agents working right now.",
+  "When you finish a meaningful task, call log_task.",
 ].join(" ");
+
+/** How to run this bridge as a child process. */
+export function selfArgv(): string[] {
+  const script = process.argv[1];
+  return script && /\.(m?js)$/.test(script) ? [process.execPath, script] : ["mm"];
+}
 
 function apiOrNull() {
   const cfg = readConfig();
@@ -35,13 +44,26 @@ export async function runHook(name: HookName, payload: HookPayload): Promise<str
     const sessionId = payload.session_id;
 
     if (name === "session-start") {
+      if (sessionId && process.env.MM_PRESENCE !== "off") {
+        startPresenceDaemon(selfArgv(), sessionId, payload.cwd ?? process.cwd());
+      }
       return JSON.stringify({
         hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: CONTEXT },
       });
     }
 
+    if (name === "user-prompt-submit") {
+      const context = sessionId ? presenceContext(sessionId) : null;
+      return context
+        ? JSON.stringify({
+            hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: context },
+          })
+        : null;
+    }
+
     if (name === "post-tool-use") {
       if (!sessionId) return null;
+      touchAlive(sessionId);
       const info = repoInfo(payload.cwd ?? process.cwd());
       const event = toActionEvent(payload, info);
       if (!event) return null;
@@ -57,6 +79,7 @@ export async function runHook(name: HookName, payload: HookPayload): Promise<str
       if (!flushDue(sessionId)) return null;
     }
 
+    if (name === "session-end" && sessionId) requestStop(sessionId);
     // post-tool-use (when due), stop and session-end send what's spooled.
     const api = apiOrNull();
     if (api) await flush(api);

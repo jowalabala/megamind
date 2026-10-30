@@ -25,7 +25,7 @@ export function selfCommand(): string {
   return "mm";
 }
 
-const MARK = / hook (session-start|post-tool-use|stop|session-end)$/;
+const MARK = new RegExp(` hook (${Object.keys(HOOK_EVENTS).join("|")})$`);
 const ours = (h: { command: string }) => MARK.test(h.command) && /\bmm(\.js")?\b/.test(h.command);
 
 function read(): Settings {

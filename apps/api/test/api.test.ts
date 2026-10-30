@@ -16,6 +16,7 @@ import {
 import { createQueue, type QueueClient } from "@mm/db/queue";
 import { adminQuery, startTestDatabase, type TestDatabase } from "@mm/db/testing";
 import { memoryBronze, startIngestWorkers, tenantRedactors } from "@mm/ingest";
+import { verifyGatewayToken } from "@mm/realtime";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -28,6 +29,7 @@ let app: Awaited<ReturnType<typeof buildApp>>;
 let baseUrl: string;
 const bronze = memoryBronze();
 const WEBHOOK_SECRET = "whsec_" + "test".repeat(8);
+const GATEWAY_SECRET = "gateway-secret-".repeat(4);
 const keys: Record<string, string> = {};
 const tenants: Record<string, string> = {};
 
@@ -110,7 +112,14 @@ beforeAll(async () => {
     bronze,
     redactorFor: tenantRedactors({ db, pseudonymSecret: "s".repeat(40) }),
   });
-  app = await buildApp({ db, queue, bronze, githubWebhookSecret: WEBHOOK_SECRET });
+  app = await buildApp({
+    db,
+    queue,
+    bronze,
+    githubWebhookSecret: WEBHOOK_SECRET,
+    gatewaySecret: GATEWAY_SECRET,
+    gatewayUrl: "wss://gateway.test",
+  });
   await app.listen({ port: 0, host: "127.0.0.1" });
   baseUrl = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
 });
@@ -164,6 +173,7 @@ describe("remote MCP", () => {
       "log_task",
       "report_outcome",
       "search_history",
+      "whats_happening",
     ]);
     expect(tools.find((t) => t.name === "search_history")!.annotations?.readOnlyHint).toBe(true);
     expect(client.getInstructions()).toContain("log_task");
@@ -387,7 +397,7 @@ describe("search_history (week 3)", () => {
     });
     expect(await res.json()).toEqual({
       agent_id: expect.any(String),
-      scopes: ["capture:write", "history:read"],
+      scopes: ["capture:write", "history:read", "collab"],
       capture_opt_out: false,
     });
   });
@@ -485,5 +495,41 @@ describe("GitHub webhooks (week 4)", () => {
       pull_request: { number: 13 },
     });
     expect(await res.json()).toEqual({ ignored: "installation_removed" });
+  });
+});
+
+describe("live awareness (week 6)", () => {
+  it("issues a 5-minute gateway token bound to the agent, never for opted-out members", async () => {
+    const res = await post("/v1/gateway/token", {}, keys.dana);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { token: string; gateway_url: string; expires_at: string };
+    expect(body.gateway_url).toBe("wss://gateway.test");
+    const claims = verifyGatewayToken(GATEWAY_SECRET, body.token)!;
+    expect(claims.tenantId).toBe(tenants.acme);
+    expect(Date.parse(body.expires_at) - Date.now()).toBeLessThanOrEqual(5 * 60_000);
+    expect((await post("/v1/gateway/token", {}, keys.omer)).status).toBe(403);
+  });
+
+  it("whats_happening lists live sessions over MCP and REST", async () => {
+    await db.withTenant(tenants.acme!, (tx) =>
+      tx.execute(sql`UPDATE agent_sessions SET last_heartbeat_at = now(), status = 'active'`),
+    );
+    const rest = await fetch(`${baseUrl}/v1/presence`, {
+      headers: { authorization: `Bearer ${keys.dana}` },
+    });
+    const { sessions } = (await rest.json()) as { sessions: { you: boolean }[] };
+    expect(sessions.length).toBeGreaterThan(0);
+    expect(sessions.every((s) => s.you)).toBe(true);
+
+    const client = await mcpClient(keys.dana!);
+    const r = await client.callTool({ name: "whats_happening", arguments: {} });
+    expect(r.isError).toBeFalsy();
+    expect((r.content as { text: string }[])[0]!.text).toContain("Nobody else");
+    await client.close();
+    // Another tenant sees none of it.
+    const other = await fetch(`${baseUrl}/v1/presence`, {
+      headers: { authorization: `Bearer ${keys.gina}` },
+    });
+    expect(((await other.json()) as { sessions: unknown[] }).sessions).toEqual([]);
   });
 });

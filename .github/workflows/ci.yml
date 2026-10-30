@@ -31,7 +31,7 @@ jobs:
       # MCP end-to-end test (Testcontainers Postgres).
       - run: pnpm test
       - run: pnpm --filter @mm/web build
-      - run: pnpm --filter @mm/api build && pnpm --filter @mm/worker build
+      - run: pnpm --filter @mm/api build && pnpm --filter @mm/worker build && pnpm --filter @mm/gateway build
       - name: Bridge builds and runs
         run: pnpm --filter @mm/bridge build && node apps/bridge/dist/mm.js --version
       - name: Services image builds

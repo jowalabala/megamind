@@ -17,7 +17,8 @@
     "db:migrate": "pnpm --filter @mm/db migrate",
     "db:seed": "pnpm --filter @mm/db seed",
     "dev:api": "pnpm --filter @mm/api dev",
-    "dev:worker": "pnpm --filter @mm/worker dev"
+    "dev:worker": "pnpm --filter @mm/worker dev",
+    "dev:gateway": "pnpm --filter @mm/gateway dev"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",

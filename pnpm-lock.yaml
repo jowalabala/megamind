@@ -56,6 +56,9 @@ importers:
       '@mm/mcp':
         specifier: workspace:*
         version: link:../../packages/mcp
+      '@mm/realtime':
+        specifier: workspace:*
+        version: link:../../packages/realtime
       '@modelcontextprotocol/sdk':
         specifier: ^1.30.0
         version: 1.32.2(zod@4.6.7)
@@ -78,6 +81,9 @@ importers:
       '@mm/privacy':
         specifier: workspace:*
         version: link:../../packages/privacy
+      '@mm/realtime':
+        specifier: workspace:*
+        version: link:../../packages/realtime
       '@modelcontextprotocol/sdk':
         specifier: ^1.30.0
         version: 1.32.2(zod@4.6.7)
@@ -85,6 +91,31 @@ importers:
         specifier: ^4.1.0
         version: 4.6.7
     devDependencies:
+      tsx:
+        specifier: ^4.20.0
+        version: 4.23.15
+
+  apps/gateway:
+    dependencies:
+      '@mm/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@mm/ingest':
+        specifier: workspace:*
+        version: link:../../packages/ingest
+      '@mm/realtime':
+        specifier: workspace:*
+        version: link:../../packages/realtime
+      ws:
+        specifier: ^8.18.0
+        version: 8.22.0
+    devDependencies:
+      '@mm/bridge':
+        specifier: workspace:*
+        version: link:../bridge
+      '@types/ws':
+        specifier: ^8.18.0
+        version: 8.18.2
       tsx:
         specifier: ^4.20.0
         version: 4.23.15
@@ -239,6 +270,9 @@ importers:
       '@mm/packs':
         specifier: workspace:*
         version: link:../packs
+      '@mm/skills':
+        specifier: workspace:*
+        version: link:../skills
       '@types/pg':
         specifier: ^8.15.0
         version: 8.23.1
@@ -341,6 +375,9 @@ importers:
       '@mm/ingest':
         specifier: workspace:*
         version: link:../ingest
+      '@mm/realtime':
+        specifier: workspace:*
+        version: link:../realtime
       '@modelcontextprotocol/sdk':
         specifier: ^1.30.0
         version: 1.32.2(zod@4.6.7)
@@ -378,6 +415,31 @@ importers:
       '@aws-sdk/client-comprehend':
         specifier: ^3.1150.0
         version: 3.1160.0
+
+  packages/realtime:
+    dependencies:
+      zod:
+        specifier: ^4.1.0
+        version: 4.6.7
+
+  packages/skills:
+    dependencies:
+      '@mm/db':
+        specifier: workspace:*
+        version: link:../db
+      '@mm/lake':
+        specifier: workspace:*
+        version: link:../lake
+      '@mm/llm':
+        specifier: workspace:*
+        version: link:../llm
+      zod:
+        specifier: ^4.1.0
+        version: 4.6.7
+    devDependencies:
+      tsx:
+        specifier: ^4.20.0
+        version: 4.23.15
 
 packages:
 
@@ -1486,6 +1548,9 @@ packages:
 
   '@types/ssh2@1.15.6':
     resolution: {integrity: sha512-oGdxhBqcRTwSTKFm+9EiKzkNVYRLEFkcW44lhguvBalGJbWfGnDt/ezwSUZc+SF9m9bMc3VyklNAtp7zICjS5w==}
+
+  '@types/ws@8.18.2':
+    resolution: {integrity: sha512-67MQl+fpWKVTT1NYdnmo3U4sc/xPo/zQBncVnI74qmQa0z/b+1g6iYqNmGCPbxO+zz2aklb08a0oHfegiVd0/w==}
 
   '@typescript-eslint/eslint-plugin@8.72.1':
     resolution: {integrity: sha512-5CokTWXpmbylfFabsbvHC0CAw3XLaGnoa+nFJX5FR592h/LoZsENUE6p/rg5xvkKrFEXz6pYmgI29AgXc2N3BQ==}
@@ -3269,6 +3334,18 @@ packages:
   wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
 
+  ws@8.22.0:
+    resolution: {integrity: sha512-Ydggc987+RO0AnWtZ/7Wq9FtNvcrL1b/RO0ud9mWjUPgDrsAAwQSF51sm2hm1XofbU/4jkpGEsLFsZZxU+1DOg==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
   xtend@4.0.2:
     resolution: {integrity: sha512-LKYU1iAXJXUgAXn9URjiu+MWhyUXHsvfp7mcuYm9dSUKK0/CjtrUwFAxD82/mCWbtLsGjFIad0wIsod4zrTAEQ==}
     engines: {node: '>=0.4'}
@@ -4493,6 +4570,10 @@ snapshots:
   '@types/ssh2@1.15.6':
     dependencies:
       '@types/node': 18.19.130
+
+  '@types/ws@8.18.2':
+    dependencies:
+      '@types/node': 22.20.5
 
   '@typescript-eslint/eslint-plugin@8.72.1(@typescript-eslint/parser@8.72.1(eslint@9.39.5)(typescript@5.9.3))(eslint@9.39.5)(typescript@5.9.3)':
     dependencies:
@@ -6349,6 +6430,8 @@ snapshots:
       strip-ansi: 7.2.0
 
   wrappy@1.0.2: {}
+
+  ws@8.22.0: {}
 
   xtend@4.0.2: {}
 

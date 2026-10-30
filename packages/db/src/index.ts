@@ -24,5 +24,7 @@ export { ErasureNotAllowedError } from "./repos/erasure.ts";
 export * as historyRepo from "./repos/history.ts";
 export type { HistoryItem, HistoryOutcome, HistoryQuery } from "./repos/history.ts";
 export * as memberRepo from "./repos/members.ts";
+export * as presenceRepo from "./repos/presence.ts";
+export type { LiveSession } from "./repos/presence.ts";
 export * from "./schema.ts";
 export { and, asc, desc, eq, inArray, isNull, lt, lte, sql } from "drizzle-orm";

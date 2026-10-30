@@ -3,8 +3,15 @@
 import { createHash } from "node:crypto";
 import rateLimit from "@fastify/rate-limit";
 import { appendAuditEvent } from "@mm/audit";
-import { connectionRepo, historyRepo, type AuthenticatedAgent, type MasterMindDb } from "@mm/db";
+import {
+  connectionRepo,
+  historyRepo,
+  presenceRepo,
+  type AuthenticatedAgent,
+  type MasterMindDb,
+} from "@mm/db";
 import type { QueueName } from "@mm/db/queue";
+import { signGatewayToken } from "@mm/realtime";
 import { backfillAddedRepos, installationOf, planWebhook, verifySignature } from "@mm/github";
 import {
   acceptActions,
@@ -20,6 +27,7 @@ import {
   type IngestSource,
 } from "@mm/ingest";
 import {
+  registerAwarenessTools,
   registerCaptureTools,
   registerHistoryTools,
   searchHistoryInput,
@@ -37,6 +45,10 @@ import { z } from "zod";
 
 export interface AppDeps extends AcceptDeps {
   db: MasterMindDb;
+  /** Shared with the gateway; signs short-lived WebSocket tokens. */
+  gatewaySecret?: string;
+  /** Public URL of the gateway, e.g. wss://app.example.com (the bridge connects to <url>/ws). */
+  gatewayUrl?: string;
   /** GitHub App webhook secret. Without it the webhook endpoint is not mounted. */
   githubWebhookSecret?: string;
   logger?: boolean | object;
@@ -52,6 +64,20 @@ declare module "fastify" {
 
 const toCapture = (r: AcceptResult): CaptureResult =>
   r.captured ? { captured: true, id: r.id } : { captured: false, reason: r.reason };
+
+function requireScope(agent: AuthenticatedAgent, scope: AuthenticatedAgent["scopes"][number]) {
+  if (!agent.scopes.includes(scope)) {
+    throw new IngestForbiddenError(`This agent key does not have the ${scope} scope.`);
+  }
+}
+
+async function whatsHappening(db: MasterMindDb, agent: AuthenticatedAgent) {
+  requireScope(agent, "collab");
+  const sessions = await db.withTenant(agent.tenantId, (tx) =>
+    presenceRepo.liveSessions(tx, agent.memberId),
+  );
+  return { sessions };
+}
 
 /** The local bridge identifies itself; everything else counts as remote MCP. */
 const sourceOf = (req: FastifyRequest): IngestSource =>
@@ -148,6 +174,13 @@ export async function buildApp(deps: AppDeps) {
       logTask: (input) => forbidden(() => acceptTask(deps, agent, input, sourceOf(req))),
       reportOutcome: (input) => forbidden(() => acceptOutcome(deps, agent, input, sourceOf(req))),
     });
+    registerAwarenessTools(server, {
+      whatsHappening: () =>
+        whatsHappening(deps.db, agent).catch((err) => {
+          if (err instanceof IngestForbiddenError) throw new ToolUserError(err.message);
+          throw err;
+        }),
+    });
     registerHistoryTools(server, {
       searchHistory: (input) =>
         searchHistory(deps.db, agent, input).catch((err) => {
@@ -191,6 +224,24 @@ export async function buildApp(deps: AppDeps) {
   app.post("/v1/history/search", { preHandler: requireAgent }, async (req) =>
     searchHistory(deps.db, req.agent!, searchHistoryInput.parse(req.body)),
   );
+  app.get("/v1/presence", { preHandler: requireAgent }, async (req) =>
+    whatsHappening(deps.db, req.agent!),
+  );
+  // A 5-minute token for the real-time gateway, so agent keys never go to the WebSocket.
+  app.post("/v1/gateway/token", { preHandler: requireAgent }, async (req, reply) => {
+    const agent = req.agent!;
+    requireScope(agent, "collab");
+    if (!deps.gatewaySecret || !deps.gatewayUrl) {
+      return reply.code(503).send({ error: "gateway_not_configured" });
+    }
+    if (agent.captureOptOut) return reply.code(403).send({ error: "capture_opt_out" });
+    const { token, expiresAt } = signGatewayToken(deps.gatewaySecret, {
+      tenantId: agent.tenantId,
+      agentId: agent.agentId,
+      memberId: agent.memberId,
+    });
+    return { token, expires_at: expiresAt.toISOString(), gateway_url: deps.gatewayUrl };
+  });
   // Lets the bridge check a key at login. Ids and scopes only.
   app.get("/v1/whoami", { preHandler: requireAgent }, async (req) => ({
     agent_id: req.agent!.agentId,

@@ -426,6 +426,38 @@ export const judgments = pgTable("judgments", {
   judgedAt: timestamp("judged_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Skill drafts (migration 0009) -------------------------------------------------------------
+
+export interface SkillDraftBody {
+  when_to_use: string;
+  preconditions: string[];
+  steps: { text: string; evidence: string[] }[];
+  anti_patterns: { text: string; evidence: string[] }[];
+  expected_outcome: string;
+}
+
+export const skillDrafts = pgTable("skill_drafts", {
+  id: uuid("id").primaryKey(),
+  tenantId: uuid("tenant_id").notNull(),
+  pack: text("pack").notNull(),
+  category: text("category").notNull(),
+  windowFrom: timestamp("window_from", { withTimezone: true }),
+  windowTo: timestamp("window_to", { withTimezone: true }).notNull(),
+  status: text("status", { enum: ["draft", "rejected"] })
+    .notNull()
+    .default("draft"),
+  title: text("title").notNull(),
+  body: jsonb("body").$type<SkillDraftBody>().notNull(),
+  cohort: jsonb("cohort")
+    .$type<{ success: string[]; failure: string[]; hints: unknown[] }>()
+    .notNull(),
+  droppedCitations: integer("dropped_citations").notNull().default(0),
+  lowConfidence: boolean("low_confidence").notNull().default(false),
+  promptId: text("prompt_id").notNull(),
+  promptVersion: integer("prompt_version").notNull(),
+  createdAt: createdAt(),
+});
+
 /** Every Drizzle table, used by the drift test. */
 export const allTables = {
   tenants,
@@ -449,4 +481,5 @@ export const allTables = {
   githubPullRequests,
   githubPrLinks,
   judgments,
+  skillDrafts,
 };

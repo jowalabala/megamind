@@ -16,10 +16,14 @@
   "dependencies": {
     "@mm/mcp": "workspace:*",
     "@mm/privacy": "workspace:*",
+    "@mm/realtime": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "zod": "^4.1.0"
   },
   "devDependencies": {
     "tsx": "^4.20.0"
+  },
+  "exports": {
+    "./presence": "./src/presence.ts"
   }
 }

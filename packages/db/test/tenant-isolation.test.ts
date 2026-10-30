@@ -106,6 +106,9 @@ async function seedTenant(slug: string) {
       VALUES (${t.tenantId}, ${prTask}, ${conn!.id}, 1, ${`${slug}/api`}, 1, 'github:42', 'open',
         'main', 'feature', now(), now())`);
     await tx.execute(sql`
+      INSERT INTO skill_drafts (id, tenant_id, pack, category, window_to, title, body, cohort, prompt_id, prompt_version)
+      VALUES (gen_random_uuid(), ${t.tenantId}, 'engineering', 'bugfix', now(), 'Seed skill', '{}', '{}', 'skills.extract', 1)`);
+    await tx.execute(sql`
       INSERT INTO github_pr_links (tenant_id, from_task_id, to_task_id, kind)
       VALUES (${t.tenantId}, ${prTask}, ${taskId}, 'fixes')`);
     await tx.execute(sql`
@@ -314,7 +317,7 @@ describe("agent keys", () => {
       tenantId: A.tenantId,
       agentId: A.agentId,
       memberId: A.memberId,
-      scopes: ["capture:write", "history:read"],
+      scopes: ["capture:write", "history:read", "collab"],
       captureOptOut: false,
     });
     expect((await db.system.authenticateAgent(B.agentKey))?.tenantId).toBe(B.tenantId);
