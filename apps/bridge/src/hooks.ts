@@ -13,6 +13,7 @@ import {
   takeChannelEvents,
   touchAlive,
 } from "./presence.ts";
+import { skillsContext, syncSkills } from "./skills.ts";
 import { append, flush, flushDue } from "./spool.ts";
 
 export const HOOK_EVENTS = {
@@ -27,11 +28,11 @@ export type HookName = keyof typeof HOOK_EVENTS;
 const CONTEXT = [
   "Master Mind is on for this session. Your tool use is captured as short summaries",
   "(secrets are removed on this machine first) so the team can learn what works.",
-  "Before non-trivial work, call the master-mind search_history tool to see related past work",
-  "and how it turned out. Call announce_intent when you start a task, with the files you expect",
+  "Before non-trivial work, call the master-mind search_skills tool for the team's approved practices,",
+  "and search_history to see related past work and how it turned out. Call announce_intent when you start a task, with the files you expect",
   "to touch: you'll be alerted if a teammate's agent is changing the same code.",
   "whats_happening shows teammates' agents working right now.",
-  "When you finish a meaningful task, call log_task.",
+  "When you finish a meaningful task, call log_task (with skills_used for any skills you followed).",
 ].join(" ");
 
 /** How to run this bridge as a child process. */
@@ -56,8 +57,21 @@ export async function runHook(name: HookName, payload: HookPayload): Promise<str
       if (sessionId && process.env.MM_PRESENCE !== "off") {
         startPresenceDaemon(selfArgv(), sessionId, payload.cwd ?? process.cwd());
       }
+      // Bring team skills up to date. Quick or not at all: a slow API never delays the agent.
+      let skills: string | null = null;
+      const api = process.env.MM_SKILLS_SYNC === "off" ? null : apiOrNull();
+      if (api) {
+        try {
+          skills = skillsContext((await syncSkills(api)).skills);
+        } catch (err) {
+          logError("skills sync", err);
+        }
+      }
       return JSON.stringify({
-        hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: CONTEXT },
+        hookSpecificOutput: {
+          hookEventName: "SessionStart",
+          additionalContext: [CONTEXT, skills].filter(Boolean).join("\n\n"),
+        },
       });
     }
 

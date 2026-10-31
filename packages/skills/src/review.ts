@@ -13,6 +13,7 @@ import {
   categoryOwners,
   eq,
   members,
+  notificationRepo,
   skillReviews,
   skills,
   skillVersions,
@@ -63,7 +64,12 @@ export async function reviewSkill(
     throw new ReviewError("Only admins and this category's owners can review its skills.");
   }
   let version = skill.currentVersion;
-  const set: Partial<typeof skills.$inferInsert> = { updatedAt: new Date() };
+  // Any decision by a person settles a measurement flag.
+  const set: Partial<typeof skills.$inferInsert> = {
+    updatedAt: new Date(),
+    flaggedAt: null,
+    flagReason: null,
+  };
   switch (input.action) {
     case "approve":
       if (skill.status === "retired")
@@ -117,6 +123,18 @@ export async function reviewSkill(
     targetId: skill.id,
     payload: { version },
   });
+  // Subscribers hear when what their agents receive changes.
+  const served = input.action === "approve" || input.action === "rollback";
+  if (served || input.action === "retire") {
+    const subs = await notificationRepo.subscribersOf(tx, skill.pack, skill.category);
+    await notificationRepo.enqueueMany(
+      tx,
+      tenantId,
+      subs.filter((m) => m !== input.memberId),
+      served ? "skill_approved" : "skill_retired",
+      { skill_id: skill.id, version, title: skill.title, category: skill.category },
+    );
+  }
   return {
     status: set.status ?? skill.status,
     approvedVersion: set.approvedVersion ?? skill.approvedVersion,
@@ -133,23 +151,26 @@ export type SkillListItem = {
   approved_version: number | null;
   updated_at: string;
   rank: number;
+  flagged: boolean;
 };
 
 /** The library: keyword search over each skill's latest version (title and body). */
 export async function searchSkills(
   tx: TenantTx,
-  q: { text?: string; status?: string; category?: string; limit?: number },
+  q: { text?: string; status?: string; category?: string; flagged?: boolean; limit?: number },
 ): Promise<SkillListItem[]> {
   const text = q.text?.trim() || null;
   const tsq = text ? sql`websearch_to_tsquery('simple', ${text})` : sql`NULL::tsquery`;
   const res = await tx.execute<Omit<SkillListItem, "updated_at"> & { updated_at: Date }>(sql`
     SELECT s.id, s.title, s.pack, s.category, s.status, s.current_version, s.approved_version, s.updated_at,
+           (s.flagged_at IS NOT NULL) AS flagged,
            ${text ? sql`ts_rank(v.search, ${tsq}) + CASE WHEN s.title ILIKE ${`%${text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`} THEN 1 ELSE 0 END` : sql`0`}::float8 AS rank
       FROM skills s
       JOIN skill_versions v ON v.skill_id = s.id AND v.version = s.current_version
      WHERE true
        ${text ? sql`AND (v.search @@ ${tsq} OR s.title ILIKE ${`%${text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`})` : sql``}
        ${q.status ? sql`AND s.status = ${q.status}` : sql``}
+       ${q.flagged ? sql`AND s.flagged_at IS NOT NULL` : sql``}
        ${q.category ? sql`AND s.category = ${q.category}` : sql``}
      ORDER BY rank DESC, s.updated_at DESC
      LIMIT ${Math.min(q.limit ?? 50, 200)}`);
@@ -160,10 +181,12 @@ export async function searchSkills(
   }));
 }
 
-/** Skills waiting for this member's review. */
+/** Skills waiting for this member's review: new versions, and served skills flagged by measurement. */
 export async function reviewQueue(tx: TenantTx, memberId: string) {
   const [m] = await tx.select({ role: members.role }).from(members).where(eq(members.id, memberId));
-  const all = await searchSkills(tx, { status: "in_review", limit: 200 });
+  const waiting = await searchSkills(tx, { status: "in_review", limit: 200 });
+  const flagged = await searchSkills(tx, { flagged: true, limit: 200 });
+  const all = [...waiting, ...flagged.filter((f) => !waiting.some((w) => w.id === f.id))];
   if (m?.role === "admin") return all;
   const owned = await tx.select().from(categoryOwners).where(eq(categoryOwners.memberId, memberId));
   return all.filter((s) => owned.some((o) => o.pack === s.pack && o.category === s.category));

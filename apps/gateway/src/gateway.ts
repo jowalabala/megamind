@@ -42,6 +42,8 @@ export interface GatewayOptions {
   ssl?: { rejectUnauthorized: boolean } | boolean;
   secret: string;
   redactorFor: RedactorFor;
+  /** The web app's URL, so agents can point their person at the approval page. */
+  webUrl?: string;
   /** How often every viewer's presence is recomputed regardless of notifications. */
   sweepMs?: number;
   log?: (event: string, fields: Record<string, unknown>) => void;
@@ -72,6 +74,9 @@ function tokenFrom(req: IncomingMessage): string | null {
 }
 
 export async function createGateway(options: GatewayOptions) {
+  const approvalUrl = options.webUrl
+    ? `${options.webUrl.replace(/\/+$/, "")}/channels`
+    : "the Channels page in Master Mind";
   const log = options.log ?? (() => {});
   const conns = new Set<Conn>();
   const byTenant = (tenantId: string) =>
@@ -143,7 +148,7 @@ export async function createGateway(options: GatewayOptions) {
             const waiting = r.status === "requested" && r.approval === "pending";
             const text =
               r.status === "requested"
-                ? `A channel was requested: "${r.purpose}". It opens once both people approve in Master Mind${waiting ? " (your person hasn't yet)" : ""}.`
+                ? `A channel was requested: "${r.purpose}". It opens once both people approve in Master Mind${waiting ? ` (your person hasn't yet: ask them to approve at ${approvalUrl}, or in Slack if it is connected)` : ""}.`
                 : r.status === "open"
                   ? `Channel ${r.channel_id} is open: "${r.purpose}". Use channel_read and channel_send.`
                   : `Channel ${r.channel_id} is ${r.status}.`;

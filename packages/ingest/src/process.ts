@@ -22,6 +22,7 @@ import { mergeCounts, type Redactor } from "@mm/privacy";
 import { idFromKey, type BronzeEnvelope, type IngestJob } from "./accept.ts";
 import type { BronzeStore } from "./bronze.ts";
 import type { RedactorFor } from "./redaction.ts";
+import { recordSkillUses } from "./skill-usage.ts";
 import {
   actionBatchInput,
   announceIntentInput,
@@ -223,6 +224,26 @@ export async function processTask(deps: ProcessDeps, job: IngestJob): Promise<Pr
         ingestedAt: new Date(),
       }),
     ]);
+    if (input.skills_used.length > 0) {
+      await recordSkillUses(
+        tx,
+        job.tenantId,
+        {
+          memberId: job.memberId,
+          agentId: job.agentId,
+          sessionId,
+          taskId: job.id,
+          source: job.source === "bridge" ? "bridge" : "mcp",
+          usedAt: input.completed_at ? new Date(input.completed_at) : inserted[0]!.createdAt,
+          key: job.id,
+        },
+        input.skills_used.map((u) => ({
+          skillId: u.skill_id,
+          version: u.version,
+          adherence: u.adherence,
+        })),
+      );
+    }
     return "stored" as const;
   });
 }

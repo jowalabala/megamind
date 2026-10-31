@@ -23,6 +23,7 @@ const gateway = await createGateway({
   ssl,
   secret,
   redactorFor: tenantRedactors({ db, pseudonymSecret }),
+  webUrl: process.env.MM_WEB_URL || undefined,
   log,
 });
 const port = Number(process.env.PORT ?? 4200);

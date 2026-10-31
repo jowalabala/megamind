@@ -1,0 +1,23 @@
+{
+  "name": "@mm/slack",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@mm/audit": "workspace:*",
+    "@mm/collab": "workspace:*",
+    "@mm/db": "workspace:*",
+    "@mm/vault": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.15.0",
+    "pg": "^8.16.0"
+  }
+}

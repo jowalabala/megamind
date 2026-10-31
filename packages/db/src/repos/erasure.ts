@@ -23,13 +23,20 @@ export async function requestMemberErasure(
     throw new ErasureNotAllowedError("Admins can't erase themselves; ask another admin.");
   }
   const [subject] = await tx
-    .select({ id: members.id, githubUserId: members.githubUserId })
+    .select({
+      id: members.id,
+      githubUserId: members.githubUserId,
+      hubspotUserId: members.hubspotUserId,
+    })
     .from(members)
     .where(eq(members.id, input.subjectMemberId))
     .for("update");
   if (!subject) throw new ErasureNotAllowedError("That member doesn't exist.");
   // Connector data may be keyed only by their external identity.
-  const actorKeys = subject.githubUserId ? [`github:${subject.githubUserId}`] : [];
+  const actorKeys = [
+    ...(subject.githubUserId ? [`github:${subject.githubUserId}`] : []),
+    ...(subject.hubspotUserId ? [`hubspot:${subject.hubspotUserId}`] : []),
+  ];
 
   const [request] = await tx
     .insert(erasureRequests)

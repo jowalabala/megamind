@@ -20,6 +20,7 @@ import {
 
 export * from "./history.ts";
 export * from "./channels.ts";
+export * from "./skills.ts";
 
 import { presenceEntry, type OverlapAlert, type PresenceEntry } from "@mm/realtime";
 import { announceIntentInput, type AnnounceIntentInput } from "@mm/ingest/schemas";
@@ -137,11 +138,11 @@ export function registerAwarenessTools(server: McpServer, handlers: AwarenessHan
   }
 }
 
-export const SERVER_INFO = { name: "master-mind", version: "0.3.0" };
+export const SERVER_INFO = { name: "master-mind", version: "0.4.0" };
 
 export const SERVER_INSTRUCTIONS = `Master Mind is your team's shared memory of what work was done and what worked.
-Before starting non-trivial work, call search_history to see whether teammates have done something similar and how it turned out, and announce_intent to say what you're starting (you'll be alerted if someone else is working on the same thing).
-Call log_task when you finish a meaningful unit of work (a fix, a feature, a campaign email, an analysis), and report_outcome when you learn how it went.
+Before starting non-trivial work, call search_skills for the team's approved practices, search_history to see whether teammates have done something similar and how it turned out, and announce_intent to say what you're starting (you'll be alerted if someone else is working on the same thing).
+Call log_task when you finish a meaningful unit of work (a fix, a feature, a campaign email, an analysis), listing any skills you followed in skills_used, and report_outcome when you learn how it went.
 Personal data and secrets are removed before anything is stored. If the member has opted out, nothing is stored and the tools say so.`;
 
 export interface CaptureResult {

@@ -7,6 +7,7 @@ export {
   actionRecord,
   categoryRecord,
   channelMessageRecord,
+  skillUsageRecord,
   judgmentRecord,
   metricRecord,
   taskRecord,

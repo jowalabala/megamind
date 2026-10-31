@@ -31,13 +31,19 @@ export interface PackContext {
   codeSession: boolean;
 }
 
-/** The first pack that claims the task, else the generic one (or the last pack). */
+/**
+ * The pack that claims the task, else the generic one (or the last pack). Strongest claim
+ * first: the task's source, then the systems it references, then a code session. So an agent
+ * in a repository logging work on a HubSpot sequence goes to the pack for HubSpot.
+ */
 export function choosePack(packs: Pack[], ctx: PackContext): Pack {
-  const claims = (p: Pack) =>
-    p.applies_to.sources.includes(ctx.source) ||
-    p.applies_to.ref_systems.some((s) => ctx.refSystems.includes(s)) ||
-    (p.applies_to.code_sessions && ctx.codeSession);
-  return packs.find(claims) ?? packs.find((p) => p.id === "generic") ?? packs.at(-1)!;
+  return (
+    packs.find((p) => p.applies_to.sources.includes(ctx.source)) ??
+    packs.find((p) => p.applies_to.ref_systems.some((s) => ctx.refSystems.includes(s))) ??
+    packs.find((p) => p.applies_to.code_sessions && ctx.codeSession) ??
+    packs.find((p) => p.id === "generic") ??
+    packs.at(-1)!
+  );
 }
 
 const re = (p: string) => new RegExp(p, "i");

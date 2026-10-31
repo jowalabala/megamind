@@ -20,6 +20,8 @@
     "@mm/ingest": "workspace:*",
     "@mm/mcp": "workspace:*",
     "@mm/realtime": "workspace:*",
+    "@mm/skills": "workspace:*",
+    "@mm/slack": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "fastify": "^5.6.0",
     "zod": "^4.1.0"
@@ -27,7 +29,10 @@
   "devDependencies": {
     "@mm/bridge": "workspace:*",
     "@mm/gateway": "workspace:*",
+    "@mm/hubspot": "workspace:*",
     "@mm/lake": "workspace:*",
+    "@mm/packs": "workspace:*",
+    "@mm/vault": "workspace:*",
     "tsx": "^4.20.0"
   }
 }

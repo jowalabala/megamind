@@ -19,6 +19,9 @@ produce results, and turns them into reviewed, versioned skills. See [docs/PLAN.
 | `packages/mcp`       | MCP tool definitions shared by the remote server and the bridge        |
 | `packages/lake`      | Iceberg lake: outbox publisher, Athena queries, erasure, provisioning  |
 | `packages/github`    | GitHub App connector: auth, backfill, webhooks, PR sync and features   |
+| `packages/hubspot`   | HubSpot connector: OAuth, sequences, reply and meeting counts          |
+| `packages/slack`     | Slack: notification DMs, channel approval buttons, request signatures  |
+| `packages/vault`     | Seals OAuth tokens (KMS in AWS, AES-GCM locally)                       |
 | `packages/packs`     | Domain packs (YAML): categories, rules, features, metrics; categorizer |
 | `packages/backtest`  | Backtest report from the lake; agreement with hand labels              |
 | `packages/skills`    | Cohorts, skill extraction, the quality gate, dedupe, prompt evals      |
@@ -216,6 +219,31 @@ deliberate prompt change (with a version bump).
 Skills that pass the gate wait in **Skills → Review queue** until an admin or the category's owner
 approves them; only approved versions reach agents. Reviewers can retire, restore and roll back
 to any earlier version; every action is in the audit log.
+
+### Skills for agents
+
+Agents call `search_skills` and `get_skill` (approved versions only) and list the skills they
+followed in `log_task`'s `skills_used`. On **Skills**, follow categories: the bridge then
+installs their approved skills as Claude Code skills in `~/.claude/skills/mm-*` at each session
+start (or run `mm skills sync`), and removes retired ones. Each skill's page shows whether work
+that followed it did better than work that didn't; a skill that measurably hurts is flagged
+back to its reviewers. See [ADR 0009](docs/adr/0009-delivery-hubspot-slack.md).
+
+### Slack
+
+Create a Slack app with bot scopes `chat:write`, `users:read` and `users:read.email`, the
+redirect URL `<web>/integrations/slack/callback`, and interactivity pointing at
+`<api>/webhooks/slack/interactions`. Set `MM_SLACK_CLIENT_ID`, `MM_SLACK_CLIENT_SECRET` and
+`MM_SLACK_REDIRECT_URI` (web) and `MM_SLACK_SIGNING_SECRET` (API), then connect it from
+**Settings → Integrations**. Channel requests arrive as DMs with Approve and Decline buttons.
+
+### HubSpot
+
+Create a HubSpot app with scopes `oauth`, `automation.sequences.read`, `crm.objects.owners.read`
+and `crm.objects.contacts.read`, and redirect URL `<web>/integrations/hubspot/callback`. Set
+`MM_HUBSPOT_CLIENT_ID`, `MM_HUBSPOT_CLIENT_SECRET` and `MM_HUBSPOT_REDIRECT_URI` (web and worker),
+then connect it from **Settings → Integrations**. The worker imports sequences every 30 minutes
+and records reply and meeting rates once a sequence is 30 days old (counts only, no contact data).
 
 ### Removing a member
 

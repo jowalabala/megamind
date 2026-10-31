@@ -23,6 +23,7 @@ const app = await buildApp({
   queue,
   bronze,
   githubWebhookSecret: process.env.MM_GITHUB_WEBHOOK_SECRET || undefined,
+  slackSigningSecret: process.env.MM_SLACK_SIGNING_SECRET || undefined,
   gatewaySecret: process.env.MM_GATEWAY_SECRET || undefined,
   gatewayUrl: process.env.MM_GATEWAY_URL || undefined,
   webUrl: process.env.MM_WEB_URL || undefined,

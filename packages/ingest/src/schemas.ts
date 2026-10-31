@@ -1,5 +1,5 @@
 // Input contracts for capture. Shared by the MCP tools, the REST API and the bridge.
-import { ARTIFACT_KINDS } from "@mm/db/constants";
+import { ARTIFACT_KINDS, SKILL_ADHERENCE } from "@mm/db/constants";
 import { z } from "zod";
 
 const datetime = () => z.iso.datetime({ offset: true });
@@ -52,7 +52,35 @@ export const logTaskInput = z.object({
     .optional()
     .describe("Send the same key when retrying, so the task is stored once."),
   session: sessionInput.optional(),
+  skills_used: z
+    .array(
+      z.object({
+        skill_id: z.uuid(),
+        version: z.number().int().positive(),
+        adherence: z.enum(SKILL_ADHERENCE).default("followed"),
+      }),
+    )
+    .max(20)
+    .default([])
+    .describe(
+      "Team skills you followed for this task (from get_skill), so their effect can be measured.",
+    ),
 });
+
+export const recordSkillUseInput = z.object({
+  skill_id: z.uuid().describe("The skill's id, from search_skills or get_skill."),
+  version: z.number().int().positive().describe("The version you received from get_skill."),
+  task_id: z
+    .uuid()
+    .optional()
+    .describe("The task_id from log_task, if you've logged the task already."),
+  adherence: z
+    .enum(SKILL_ADHERENCE)
+    .default("followed")
+    .describe("followed = did what it says; partial = some steps; consulted = read it only."),
+  session: sessionInput.optional(),
+});
+export type RecordSkillUseInput = z.infer<typeof recordSkillUseInput>;
 
 export const reportOutcomeInput = z.object({
   task_id: z.uuid().describe("The task_id returned by log_task."),

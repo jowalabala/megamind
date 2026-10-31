@@ -65,6 +65,12 @@ importers:
       '@mm/realtime':
         specifier: workspace:*
         version: link:../../packages/realtime
+      '@mm/skills':
+        specifier: workspace:*
+        version: link:../../packages/skills
+      '@mm/slack':
+        specifier: workspace:*
+        version: link:../../packages/slack
       '@modelcontextprotocol/sdk':
         specifier: ^1.30.0
         version: 1.32.2(zod@4.6.7)
@@ -81,9 +87,18 @@ importers:
       '@mm/gateway':
         specifier: workspace:*
         version: link:../gateway
+      '@mm/hubspot':
+        specifier: workspace:*
+        version: link:../../packages/hubspot
       '@mm/lake':
         specifier: workspace:*
         version: link:../../packages/lake
+      '@mm/packs':
+        specifier: workspace:*
+        version: link:../../packages/packs
+      '@mm/vault':
+        specifier: workspace:*
+        version: link:../../packages/vault
       tsx:
         specifier: ^4.20.0
         version: 4.23.15
@@ -152,9 +167,18 @@ importers:
       '@mm/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@mm/hubspot':
+        specifier: workspace:*
+        version: link:../../packages/hubspot
       '@mm/skills':
         specifier: workspace:*
         version: link:../../packages/skills
+      '@mm/slack':
+        specifier: workspace:*
+        version: link:../../packages/slack
+      '@mm/vault':
+        specifier: workspace:*
+        version: link:../../packages/vault
       '@workos-inc/authkit-nextjs':
         specifier: ^2.17.0
         version: 2.17.0(next@15.5.28(@opentelemetry/api@1.10.0)(@types/node@22.20.5)(react-dom@19.1.10(react@19.1.10))(react@19.1.10))(react-dom@19.1.10(react@19.1.10))(react@19.1.10)
@@ -192,6 +216,9 @@ importers:
       '@mm/github':
         specifier: workspace:*
         version: link:../../packages/github
+      '@mm/hubspot':
+        specifier: workspace:*
+        version: link:../../packages/hubspot
       '@mm/ingest':
         specifier: workspace:*
         version: link:../../packages/ingest
@@ -207,6 +234,15 @@ importers:
       '@mm/privacy':
         specifier: workspace:*
         version: link:../../packages/privacy
+      '@mm/skills':
+        specifier: workspace:*
+        version: link:../../packages/skills
+      '@mm/slack':
+        specifier: workspace:*
+        version: link:../../packages/slack
+      '@mm/vault':
+        specifier: workspace:*
+        version: link:../../packages/vault
     devDependencies:
       tsx:
         specifier: ^4.20.0
@@ -338,6 +374,34 @@ importers:
       '@mm/skills':
         specifier: workspace:*
         version: link:../skills
+      '@types/pg':
+        specifier: ^8.15.0
+        version: 8.23.1
+      pg:
+        specifier: ^8.16.0
+        version: 8.23.1
+
+  packages/hubspot:
+    dependencies:
+      '@mm/audit':
+        specifier: workspace:*
+        version: link:../audit
+      '@mm/db':
+        specifier: workspace:*
+        version: link:../db
+      '@mm/ingest':
+        specifier: workspace:*
+        version: link:../ingest
+      '@mm/lake':
+        specifier: workspace:*
+        version: link:../lake
+      '@mm/vault':
+        specifier: workspace:*
+        version: link:../vault
+    devDependencies:
+      '@mm/packs':
+        specifier: workspace:*
+        version: link:../packs
       '@types/pg':
         specifier: ^8.15.0
         version: 8.23.1
@@ -520,6 +584,34 @@ importers:
       tsx:
         specifier: ^4.20.0
         version: 4.23.15
+
+  packages/slack:
+    dependencies:
+      '@mm/audit':
+        specifier: workspace:*
+        version: link:../audit
+      '@mm/collab':
+        specifier: workspace:*
+        version: link:../collab
+      '@mm/db':
+        specifier: workspace:*
+        version: link:../db
+      '@mm/vault':
+        specifier: workspace:*
+        version: link:../vault
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.15.0
+        version: 8.23.1
+      pg:
+        specifier: ^8.16.0
+        version: 8.23.1
+
+  packages/vault:
+    dependencies:
+      '@aws-sdk/client-kms':
+        specifier: ^3.1160.0
+        version: 3.1160.0
 
 packages:
 

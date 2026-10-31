@@ -3,7 +3,7 @@ import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import { AGENT_KEY_RE, hashAgentKey } from "./repos/agents.ts";
 import * as schema from "./schema.ts";
-import type { AgentScope } from "./schema.ts";
+import type { AgentScope, ConnectionProvider } from "./schema.ts";
 
 export type Database = NodePgDatabase<typeof schema>;
 /** A transaction that already has a tenant context set. All tenant data access goes through one. */
@@ -70,7 +70,7 @@ export interface MasterMindDb {
     listTenantsForJobs(): Promise<{ tenantId: string; lakeReady: boolean }[]>;
     /** Resolves an integration's external id (e.g. a GitHub installation) to its tenant. */
     resolveConnection(
-      provider: "github",
+      provider: ConnectionProvider,
       externalId: string,
     ): Promise<{ tenantId: string; connectionId: string; status: string } | null>;
   };

@@ -42,7 +42,10 @@ export default async function ReviewQueuePage() {
                       <a href={`/skills/${s.id}`}>{s.title}</a>
                     </td>
                     <td className="muted">{s.category}</td>
-                    <td className="muted">v{s.current_version}</td>
+                    <td className="muted">
+                      v{s.current_version}
+                      {s.flagged ? " · flagged by measurement" : ""}
+                    </td>
                   </tr>
                 ))}
               </tbody>

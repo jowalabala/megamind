@@ -13,11 +13,15 @@
     "@mm/collab": "workspace:*",
     "@mm/db": "workspace:*",
     "@mm/github": "workspace:*",
+    "@mm/hubspot": "workspace:*",
     "@mm/ingest": "workspace:*",
     "@mm/lake": "workspace:*",
     "@mm/llm": "workspace:*",
     "@mm/packs": "workspace:*",
-    "@mm/privacy": "workspace:*"
+    "@mm/privacy": "workspace:*",
+    "@mm/skills": "workspace:*",
+    "@mm/slack": "workspace:*",
+    "@mm/vault": "workspace:*"
   },
   "devDependencies": {
     "tsx": "^4.20.0"

@@ -148,6 +148,63 @@ judge:
   baseline: { days: 180, min_samples: 20 }
 `;
 
+// Week 9 covers HubSpot sequences; marketing emails and deals come with the full revenue pack.
+export const REVENUE_PACK = `
+id: revenue
+version: 1
+name: Revenue
+description: Sales and marketing work, from HubSpot and from agents working in it.
+applies_to:
+  sources: [hubspot]
+  ref_systems: [hubspot]
+
+categories:
+  - id: prospecting_sequence
+    name: Prospecting sequence
+    description: A sequence that reaches out to new prospects (cold or outbound).
+    rules:
+      - labels_any: [sequence]
+        title: '(cold|outbound|prospect|intro|first touch|new logo)'
+
+  - id: follow_up_sequence
+    name: Follow-up sequence
+    description: A sequence that follows up with people already in conversation (demo, trial, event, re-engagement).
+    rules:
+      - labels_any: [sequence]
+        title: '(follow[ -]?up|nurture|re-?engage|after|post[ -]|demo|trial|event|webinar|check[ -]?in)'
+
+  - id: sequence
+    name: Other sequence
+    description: Any other sales sequence.
+    rules:
+      - labels_any: [sequence]
+
+  - id: other
+    name: Other
+    description: Revenue work that isn't a sequence.
+
+fallback: other
+
+features:
+  - { id: steps, description: Steps in the sequence. }
+  - { id: email_steps, description: Automated or manual email steps. }
+  - { id: task_steps, description: Task steps (calls, LinkedIn, manual work). }
+
+metrics:
+  - { id: sequence.reply_rate, description: Share of enrolled contacts who replied after enrolling., unit: ratio, better: higher, window_days: 30 }
+  - { id: sequence.meeting_rate, description: Share of enrolled contacts who booked a meeting after enrolling., unit: ratio, better: higher, window_days: 30 }
+
+judge:
+  version: 1
+  requires: [sequence.reply_rate]
+  skip_categories: [other]
+  failure_if_any:
+    - { metric: sequence.reply_rate, op: lt, baseline: p25 }
+  success_if_all:
+    - { metric: sequence.reply_rate, op: gte, baseline: p75 }
+  baseline: { days: 365, min_samples: 10 }
+`;
+
 export const GENERIC_PACK = `
 id: generic
 version: 1

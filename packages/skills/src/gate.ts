@@ -13,12 +13,14 @@ import {
   eq,
   idFromKey,
   inArray,
+  notificationRepo,
   skillDrafts,
   skills,
   skillVersions,
   tasks,
   type MasterMindDb,
   type SkillDraftBody,
+  type TenantTx,
 } from "@mm/db";
 import { definePrompt, untrusted, type Llm } from "@mm/llm";
 import { z } from "zod";
@@ -381,6 +383,13 @@ export async function gateDraft(
           updatedAt: new Date(),
         })
         .where(eq(skills.id, target.id));
+      await notifyReviewers(tx, tenantId, {
+        skillId: target.id,
+        version,
+        title: scanned.title,
+        pack: draft.pack,
+        category: draft.category,
+      });
       return { skillId: target.id, version };
     }
     const skillId = idFromKey([tenantId, "skill", draft.id]);
@@ -403,7 +412,29 @@ export async function gateDraft(
       gate: { ...gate, relation },
       sourceDraftId: draft.id,
     });
+    await notifyReviewers(tx, tenantId, {
+      skillId,
+      version: 1,
+      title: scanned.title,
+      pack: draft.pack,
+      category: draft.category,
+    });
     return { skillId, version: 1 };
   });
   return finish({ status: "accepted", ...stored, relation, gate: { ...gate, relation } });
+}
+
+/** Tells the category's reviewers (admins and owners) that a version is waiting for them. */
+async function notifyReviewers(
+  tx: TenantTx,
+  tenantId: string,
+  s: { skillId: string; version: number; title: string; pack: string; category: string },
+) {
+  const reviewers = await notificationRepo.reviewersOf(tx, s.pack, s.category);
+  await notificationRepo.enqueueMany(tx, tenantId, reviewers, "skill_review", {
+    skill_id: s.skillId,
+    version: s.version,
+    title: s.title,
+    category: s.category,
+  });
 }

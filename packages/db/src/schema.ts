@@ -23,6 +23,7 @@ import {
   CAPTURE_SOURCES,
   CATEGORY_SOURCES,
   DEFAULT_AGENT_SCOPES,
+  SKILL_ADHERENCE,
   type AgentScope,
 } from "./constants.ts";
 
@@ -64,6 +65,8 @@ export const members = pgTable("members", {
   visibilityPref: visibilityPref("visibility_pref").notNull().default("team"),
   createdAt: createdAt(),
   githubUserId: bigint("github_user_id", { mode: "number" }),
+  slackUserId: text("slack_user_id"),
+  hubspotUserId: bigint("hubspot_user_id", { mode: "number" }),
 });
 
 export const teamMembers = pgTable(
@@ -275,6 +278,7 @@ export const LAKE_TABLES = [
   "task_categories",
   "judgments",
   "channel_messages",
+  "skill_usage",
 ] as const;
 export type LakeTableName = (typeof LAKE_TABLES)[number];
 
@@ -310,10 +314,13 @@ export const erasureRequests = pgTable("erasure_requests", {
 
 // GitHub (migration 0007) ----------------------------------------------------------------
 
+export const CONNECTION_PROVIDERS = ["github", "hubspot", "slack"] as const;
+export type ConnectionProvider = (typeof CONNECTION_PROVIDERS)[number];
+
 export const connections = pgTable("connections", {
   id: uuid("id").primaryKey().defaultRandom(),
   tenantId: uuid("tenant_id").notNull(),
-  provider: text("provider", { enum: ["github"] }).notNull(),
+  provider: text("provider", { enum: CONNECTION_PROVIDERS }).notNull(),
   externalId: text("external_id").notNull(),
   accountLogin: text("account_login"),
   status: text("status", { enum: ["active", "suspended", "removed"] })
@@ -511,6 +518,9 @@ export const skills = pgTable("skills", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   /** The version agents receive; null until one is approved. */
   approvedVersion: integer("approved_version"),
+  /** Set when measurement shows the served version hurts outcomes; cleared by a review. */
+  flaggedAt: timestamp("flagged_at", { withTimezone: true }),
+  flagReason: text("flag_reason"),
 });
 
 export const skillVersions = pgTable(
@@ -684,6 +694,136 @@ export const skillReviews = pgTable("skill_reviews", {
   createdAt: createdAt(),
 });
 
+// Delivery, measurement, notifications, HubSpot, attribution (migration 0012) ----------
+
+export const connectionSecrets = pgTable(
+  "connection_secrets",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    connectionId: uuid("connection_id").notNull(),
+    kind: text("kind", { enum: ["refresh_token", "bot_token"] }).notNull(),
+    sealed: text("sealed").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.connectionId, t.kind] })],
+);
+
+export interface SequenceCounts {
+  enrolled: number;
+  replied: number;
+  meetings: number;
+  as_of: string;
+}
+
+export const hubspotSequences = pgTable(
+  "hubspot_sequences",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    taskId: uuid("task_id").notNull(),
+    connectionId: uuid("connection_id"),
+    sequenceId: text("sequence_id").notNull(),
+    ownerUserId: bigint("owner_user_id", { mode: "number" }),
+    steps: integer("steps").notNull().default(0),
+    emailSteps: integer("email_steps").notNull().default(0),
+    taskSteps: integer("task_steps").notNull().default(0),
+    createdAtHs: timestamp("created_at_hs", { withTimezone: true }).notNull(),
+    updatedAtHs: timestamp("updated_at_hs", { withTimezone: true }).notNull(),
+    counts: jsonb("counts").$type<Partial<SequenceCounts>>().notNull().default({}),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+    metricsFinalAt: timestamp("metrics_final_at", { withTimezone: true }),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.taskId] })],
+);
+
+export const ATTRIBUTION_METHODS = ["reference", "heuristic"] as const;
+/** Attributions below this confidence are kept but not used for learning or measurement. */
+export const ATTRIBUTION_MIN_CONFIDENCE = 0.7;
+
+export const taskAttributions = pgTable(
+  "task_attributions",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    taskId: uuid("task_id").notNull(),
+    targetTaskId: uuid("target_task_id").notNull(),
+    method: text("method", { enum: ATTRIBUTION_METHODS }).notNull(),
+    confidence: real("confidence").notNull(),
+    evidence: jsonb("evidence").$type<Record<string, number | string>>().notNull().default({}),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.taskId, t.targetTaskId] })],
+);
+
+export const skillSubscriptions = pgTable(
+  "skill_subscriptions",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    memberId: uuid("member_id").notNull(),
+    pack: text("pack").notNull(),
+    /** "*" means every category in the pack. */
+    category: text("category").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.memberId, t.pack, t.category] })],
+);
+
+export const skillUsage = pgTable("skill_usage", {
+  id: uuid("id").primaryKey(),
+  tenantId: uuid("tenant_id").notNull(),
+  skillId: uuid("skill_id").notNull(),
+  version: integer("version").notNull(),
+  taskId: uuid("task_id"),
+  sessionId: uuid("session_id"),
+  memberId: uuid("member_id").notNull(),
+  agentIdentityId: uuid("agent_identity_id"),
+  adherence: text("adherence", { enum: SKILL_ADHERENCE }).notNull().default("followed"),
+  usedAt: timestamp("used_at", { withTimezone: true }).notNull(),
+  createdAt: createdAt(),
+});
+
+export const MEASUREMENT_STATUSES = ["insufficient", "no_effect", "improves", "degrades"] as const;
+export type MeasurementStatus = (typeof MEASUREMENT_STATUSES)[number];
+
+export const skillMeasurements = pgTable("skill_measurements", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id").notNull(),
+  skillId: uuid("skill_id").notNull(),
+  version: integer("version"),
+  windowDays: integer("window_days").notNull(),
+  usedN: integer("used_n").notNull(),
+  usedSuccess: integer("used_success").notNull(),
+  baseN: integer("base_n").notNull(),
+  baseSuccess: integer("base_success").notNull(),
+  lift: doublePrecision("lift"),
+  ciLow: doublePrecision("ci_low"),
+  ciHigh: doublePrecision("ci_high"),
+  status: text("status", { enum: MEASUREMENT_STATUSES }).notNull(),
+  measuredAt: timestamp("measured_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const NOTIFICATION_KINDS = [
+  "channel_request",
+  "skill_review",
+  "skill_flagged",
+  "skill_approved",
+  "skill_retired",
+] as const;
+export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
+
+export const notifications = pgTable("notifications", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id").notNull(),
+  memberId: uuid("member_id").notNull(),
+  kind: text("kind", { enum: NOTIFICATION_KINDS }).notNull(),
+  payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+  status: text("status", { enum: ["pending", "sent", "skipped", "failed"] })
+    .notNull()
+    .default("pending"),
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
+  createdAt: createdAt(),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+});
+
 /** Every Drizzle table, used by the drift test. */
 export const allTables = {
   tenants,
@@ -721,4 +861,11 @@ export const allTables = {
   agreements,
   categoryOwners,
   skillReviews,
+  connectionSecrets,
+  hubspotSequences,
+  taskAttributions,
+  skillSubscriptions,
+  skillUsage,
+  skillMeasurements,
+  notifications,
 };

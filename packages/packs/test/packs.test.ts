@@ -10,7 +10,7 @@ import {
   type CategorizeInput,
 } from "../src/index.ts";
 
-const [engineering, generic] = builtinPacks();
+const [engineering, , generic] = builtinPacks();
 
 const task = (t: Partial<CategorizeInput>): CategorizeInput => ({
   title: "",
@@ -181,8 +181,37 @@ describe("choosePack", () => {
     expect(choosePack(packs, { source: "bridge", refSystems: [], codeSession: true }).id).toBe(
       "engineering",
     );
+    expect(choosePack(packs, { source: "mcp", refSystems: [], codeSession: false }).id).toBe(
+      "generic",
+    );
+  });
+
+  it("routes HubSpot work to revenue, even from an agent in a repository", () => {
+    expect(choosePack(packs, { source: "hubspot", refSystems: [], codeSession: false }).id).toBe(
+      "revenue",
+    );
     expect(
-      choosePack(packs, { source: "mcp", refSystems: ["hubspot"], codeSession: false }).id,
-    ).toBe("generic");
+      choosePack(packs, { source: "bridge", refSystems: ["hubspot"], codeSession: true }).id,
+    ).toBe("revenue");
+  });
+});
+
+describe("revenue pack", () => {
+  const revenue = builtinPacks().find((p) => p.id === "revenue")!;
+  const seq = (title: string) => ({
+    title,
+    summary: "",
+    labels: ["sequence"],
+    branch: null,
+    files: [],
+    authorIsBot: false,
+    hint: null,
+  });
+  it("categorizes sequences by their name", async () => {
+    const cat = async (title: string) =>
+      (await categorize(revenue, seq(title), { tenantId: "t" })).category;
+    expect(await cat("Q3 outbound - CFOs")).toBe("prospecting_sequence");
+    expect(await cat("Post-demo follow up")).toBe("follow_up_sequence");
+    expect(await cat("Partners")).toBe("sequence");
   });
 });

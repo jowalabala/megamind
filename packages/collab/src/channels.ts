@@ -21,6 +21,7 @@ import {
   isNull,
   leases,
   members,
+  notificationRepo,
   sql,
   SHARE_KINDS,
   type ChannelMessageType,
@@ -169,6 +170,26 @@ export async function requestChannel(
       approvedVia: pre ? "preapproval" : null,
       decidedAt: pre ? new Date() : null,
     });
+    // Each person still to decide gets asked (Slack, when connected; the web app always).
+    if (!pre) {
+      const [requester] = await tx
+        .select({ name: members.displayName })
+        .from(members)
+        .where(eq(members.id, from.memberId));
+      await notificationRepo.enqueueNotification(tx, tenantId, {
+        memberId: s.memberId,
+        kind: "channel_request",
+        payload: {
+          channel_id: id,
+          purpose,
+          requested_by_you: s === from,
+          requester: requester?.name ?? "a teammate",
+          share,
+          ttl_minutes: input.ttlMinutes,
+          resources: resources.slice(0, 5),
+        },
+      });
+    }
   }
   await appendAuditEvent(tx, tenantId, {
     actorType: "agent",

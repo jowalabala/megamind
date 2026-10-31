@@ -215,3 +215,31 @@ export function channelMessageRecord(
     },
   };
 }
+
+export function skillUsageRecord(
+  u: Base & {
+    id: string;
+    skillId: string;
+    version: number;
+    taskId: string | null;
+    sessionId: string | null;
+    adherence: string;
+    usedAt: Date;
+  },
+): LakeRecord {
+  return {
+    table: "skill_usage",
+    eventId: u.id,
+    memberId: u.memberId,
+    row: {
+      event_id: u.id,
+      ...base(u),
+      skill_id: u.skillId,
+      version: u.version,
+      task_id: u.taskId,
+      session_id: u.sessionId,
+      adherence: u.adherence,
+      event_time: iso(u.usedAt),
+    },
+  };
+}

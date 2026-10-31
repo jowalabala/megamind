@@ -1,11 +1,20 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CfnOutput, Duration, IgnoreMode, Stack, type StackProps } from "aws-cdk-lib";
+import {
+  CfnOutput,
+  Duration,
+  IgnoreMode,
+  RemovalPolicy,
+  SecretValue,
+  Stack,
+  type StackProps,
+} from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as ecsPatterns from "aws-cdk-lib/aws-ecs-patterns";
 import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import * as iam from "aws-cdk-lib/aws-iam";
+import * as kms from "aws-cdk-lib/aws-kms";
 import * as logs from "aws-cdk-lib/aws-logs";
 import type * as rds from "aws-cdk-lib/aws-rds";
 import type * as s3 from "aws-cdk-lib/aws-s3";
@@ -64,6 +73,29 @@ export class AppStack extends Stack {
       description: "GitHub App id and private key (keys APP_ID, PRIVATE_KEY)",
     });
 
+    // HubSpot and Slack app credentials. Created empty so a deploy works before the apps are
+    // registered; the services treat empty values as "not configured". Fill in by hand.
+    const empty = (keys: string[]) =>
+      Object.fromEntries(keys.map((k) => [k, SecretValue.unsafePlainText("")]));
+    const hubspotApp = new secretsmanager.Secret(this, "HubspotAppSecret", {
+      secretName: `mastermind/${cfg.stage}/hubspot-app`,
+      description: "HubSpot app client id and secret (keys CLIENT_ID, CLIENT_SECRET)",
+      secretObjectValue: empty(["CLIENT_ID", "CLIENT_SECRET"]),
+    });
+    const slackApp = new secretsmanager.Secret(this, "SlackAppSecret", {
+      secretName: `mastermind/${cfg.stage}/slack-app`,
+      description: "Slack app client id, client secret and signing secret",
+      secretObjectValue: empty(["CLIENT_ID", "CLIENT_SECRET", "SIGNING_SECRET"]),
+    });
+
+    // Seals OAuth tokens (HubSpot refresh tokens, Slack bot tokens) before they reach the
+    // database; each value is bound to its tenant by the encryption context.
+    const tokenKey = new kms.Key(this, "TokenVaultKey", {
+      description: "Master Mind token vault (OAuth tokens for integrations)",
+      enableKeyRotation: true,
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+
     const web = new ecsPatterns.ApplicationLoadBalancedFargateService(this, "Web", {
       cluster,
       desiredCount: cfg.webDesiredCount,
@@ -104,9 +136,25 @@ export class AppStack extends Stack {
           MM_GITHUB_APP_SLUG: ecs.Secret.fromSecretsManager(githubOauth, "APP_SLUG"),
           MM_GITHUB_CLIENT_ID: ecs.Secret.fromSecretsManager(githubOauth, "CLIENT_ID"),
           MM_GITHUB_CLIENT_SECRET: ecs.Secret.fromSecretsManager(githubOauth, "CLIENT_SECRET"),
+          MM_HUBSPOT_CLIENT_ID: ecs.Secret.fromSecretsManager(hubspotApp, "CLIENT_ID"),
+          MM_HUBSPOT_CLIENT_SECRET: ecs.Secret.fromSecretsManager(hubspotApp, "CLIENT_SECRET"),
+          MM_SLACK_CLIENT_ID: ecs.Secret.fromSecretsManager(slackApp, "CLIENT_ID"),
+          MM_SLACK_CLIENT_SECRET: ecs.Secret.fromSecretsManager(slackApp, "CLIENT_SECRET"),
         },
       },
     });
+    // TODO(before pilot): https:// once the HTTPS listener exists.
+    const webUrl = `http://${web.loadBalancer.loadBalancerDnsName}`;
+    const webContainer = web.taskDefinition.defaultContainer!;
+    webContainer.addEnvironment("AWS_REGION", this.region);
+    webContainer.addEnvironment("MM_VAULT_KMS_KEY_ID", tokenKey.keyArn);
+    webContainer.addEnvironment(
+      "MM_HUBSPOT_REDIRECT_URI",
+      `${webUrl}/integrations/hubspot/callback`,
+    );
+    webContainer.addEnvironment("MM_SLACK_REDIRECT_URI", `${webUrl}/integrations/slack/callback`);
+    // The web app only seals tokens at install time; it never opens them.
+    tokenKey.grantEncrypt(web.taskDefinition.taskRole);
     web.targetGroup.configureHealthCheck({
       path: "/",
       healthyHttpCodes: "200-399",
@@ -158,7 +206,7 @@ export class AppStack extends Stack {
         ...sharedEnv,
         // TODO(before pilot): wss:// once the HTTPS listener exists (same as the web app).
         MM_GATEWAY_URL: `ws://${web.loadBalancer.loadBalancerDnsName}`,
-        MM_WEB_URL: `http://${web.loadBalancer.loadBalancerDnsName}`,
+        MM_WEB_URL: webUrl,
       },
       secrets: {
         ...dbSecrets,
@@ -166,6 +214,8 @@ export class AppStack extends Stack {
         MM_GATEWAY_SECRET: ecs.Secret.fromSecretsManager(gatewaySecret),
         // Channel text is redacted synchronously in the API (deterministic layers).
         MM_PSEUDONYM_SECRET: ecs.Secret.fromSecretsManager(pseudonymSecret),
+        // Verifies Slack button clicks (channel approvals).
+        MM_SLACK_SIGNING_SECRET: ecs.Secret.fromSecretsManager(slackApp, "SIGNING_SECRET"),
       },
       logging: ecs.LogDrivers.awsLogs({
         streamPrefix: "api",
@@ -203,7 +253,7 @@ export class AppStack extends Stack {
       image: servicesImage,
       command: ["node", "--enable-source-maps", "gateway/main.js"],
       portMappings: [{ containerPort: 4200 }],
-      environment: { ...sharedEnv, PORT: "4200" },
+      environment: { ...sharedEnv, PORT: "4200", MM_WEB_URL: webUrl },
       secrets: {
         ...dbSecrets,
         MM_GATEWAY_SECRET: ecs.Secret.fromSecretsManager(gatewaySecret),
@@ -246,18 +296,25 @@ export class AppStack extends Stack {
         MM_STAGE: cfg.stage,
         MM_LAKE_FIREHOSE_STREAM: props.lake.streamName,
         MM_LAKE_TABLE_BUCKET_ARN: props.lake.tableBucketArn,
+        MM_WEB_URL: webUrl,
+        MM_VAULT_KMS_KEY_ID: tokenKey.keyArn,
+        MM_HUBSPOT_REDIRECT_URI: `${webUrl}/integrations/hubspot/callback`,
       },
       secrets: {
         ...dbSecrets,
         MM_PSEUDONYM_SECRET: ecs.Secret.fromSecretsManager(pseudonymSecret),
         MM_GITHUB_APP_ID: ecs.Secret.fromSecretsManager(githubAppKey, "APP_ID"),
         MM_GITHUB_PRIVATE_KEY: ecs.Secret.fromSecretsManager(githubAppKey, "PRIVATE_KEY"),
+        MM_HUBSPOT_CLIENT_ID: ecs.Secret.fromSecretsManager(hubspotApp, "CLIENT_ID"),
+        MM_HUBSPOT_CLIENT_SECRET: ecs.Secret.fromSecretsManager(hubspotApp, "CLIENT_SECRET"),
       },
       logging: ecs.LogDrivers.awsLogs({
         streamPrefix: "worker",
         logRetention: logs.RetentionDays.ONE_YEAR,
       }),
     });
+    // The worker opens tokens to call HubSpot and Slack, and re-seals rotated ones.
+    tokenKey.grantEncryptDecrypt(workerTask.taskRole);
     // The worker reads raw payloads, and deletes them when a member opts out or is erased.
     props.bronzeBucket.grantRead(workerTask.taskRole, BRONZE_PREFIX);
     props.bronzeBucket.grantDelete(workerTask.taskRole, BRONZE_PREFIX);

@@ -74,6 +74,15 @@ export default async function PrivacyPage() {
               history.
             </li>
             <li>Sessions marked private are never shown to anyone else.</li>
+            <li>
+              If your workspace connects HubSpot, sequences you create are credited to you (matched
+              by your work email), and their reply and meeting rates are counted. Nothing about the
+              contacts themselves is kept: only counts.
+            </li>
+            <li>
+              If your workspace connects Slack, Master Mind sends you direct messages (approvals,
+              skill updates), finding you by your work email. It reads nothing in Slack.
+            </li>
           </ul>
           <h2>What it never does</h2>
           <ul>

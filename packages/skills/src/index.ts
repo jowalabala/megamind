@@ -52,3 +52,23 @@ export {
   setCategoryOwner,
   type SkillListItem,
 } from "./review.ts";
+export {
+  getServedSkill,
+  listSubscriptions,
+  searchServedSkills,
+  setSubscription,
+  skillMarkdown,
+  skillSlug,
+  subscribedSkills,
+  type ServedSkill,
+  type ServedSkillSummary,
+  type SkillLookup,
+} from "./deliver.ts";
+export {
+  latestMeasurements,
+  liftOf,
+  MEASURE,
+  measureSkills,
+  type Lift,
+  type MeasureDeps,
+} from "./measure.ts";

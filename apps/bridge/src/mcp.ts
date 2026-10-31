@@ -6,7 +6,11 @@ import {
   registerCaptureTools,
   registerChannelTools,
   registerHistoryTools,
+  registerSkillTools,
   SERVER_INFO,
+  SkillToolError,
+  type SkillOutput,
+  type SkillSummary,
   SERVER_INSTRUCTIONS,
   ToolUserError,
   type CaptureResult,
@@ -130,6 +134,36 @@ export function createBridgeServer(): McpServer {
   registerHistoryTools(server, {
     searchHistory: (input) =>
       call((api) => api.post<SearchHistoryResult>("/v1/history/search", input)),
+  });
+  const skillCall = <T>(fn: (api: Api) => Promise<T>) =>
+    call(fn).catch((err) => {
+      if (err instanceof ToolUserError) throw new SkillToolError(err.message);
+      throw err;
+    });
+  registerSkillTools(server, {
+    search: (input) => {
+      const q = new URLSearchParams({ limit: String(input.limit) });
+      if (input.query) q.set("q", stripSecrets(input.query));
+      if (input.category) q.set("category", input.category);
+      return skillCall((api) => api.get<{ skills: SkillSummary[] }>(`/v1/skills?${q}`));
+    },
+    get: (input) =>
+      skillCall((api) => api.get<SkillOutput>(`/v1/skills/${encodeURIComponent(input.skill_id)}`)),
+    recordUse: (input) =>
+      skillCall((api) => {
+        const s = currentSession(process.cwd());
+        return api.post<{ recorded: boolean; reason?: string }>(
+          `/v1/skills/${encodeURIComponent(input.skill_id)}/uses`,
+          {
+            version: input.version,
+            task_id: input.task_id,
+            adherence: input.adherence,
+            session: s
+              ? { id: s.sessionId, repo: s.repo, branch: s.branch, tool: "claude_code" }
+              : input.session,
+          },
+        );
+      }),
   });
   return server;
 }

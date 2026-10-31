@@ -28,6 +28,7 @@ import {
   IngestForbiddenError,
   logTaskInput,
   reportOutcomeInput,
+  recordSkillUseInput,
   type AcceptDeps,
   type AcceptResult,
   type IngestSource,
@@ -35,6 +36,8 @@ import {
 } from "@mm/ingest";
 import { CollabError } from "@mm/collab";
 import { channelHandlers, STATUS } from "./channels.ts";
+import { skillHandlers } from "./skills.ts";
+import { handleInteraction, parseInteraction, respond, verifySlackRequest } from "@mm/slack";
 import {
   ChannelToolError,
   channelInputs,
@@ -42,7 +45,11 @@ import {
   registerCaptureTools,
   registerChannelTools,
   registerHistoryTools,
+  registerSkillTools,
+  getSkillInput,
   searchHistoryInput,
+  searchSkillsInput,
+  SkillToolError,
   SERVER_INFO,
   SERVER_INSTRUCTIONS,
   ToolUserError,
@@ -65,6 +72,10 @@ export interface AppDeps extends AcceptDeps {
   redactorFor?: RedactorFor;
   /** The web app's URL, for approval links. */
   webUrl?: string;
+  /** Slack app signing secret. Without it the Slack interactions endpoint is not mounted. */
+  slackSigningSecret?: string;
+  /** Where Slack's response_url may point (tests use a local fake). */
+  slackResponseOrigins?: string[];
   /** GitHub App webhook secret. Without it the webhook endpoint is not mounted. */
   githubWebhookSecret?: string;
   logger?: boolean | object;
@@ -265,6 +276,16 @@ export async function buildApp(deps: AppDeps) {
           throw err;
         }),
     });
+    const sk = skillHandlers(deps.db, agent, sourceOf(req));
+    const skillError = (err: unknown): never => {
+      if (err instanceof IngestForbiddenError) throw new SkillToolError(err.message);
+      throw err;
+    };
+    registerSkillTools(server, {
+      search: (input) => sk.search(input).catch(skillError),
+      get: (input) => sk.get(input).catch(skillError),
+      recordUse: (input) => sk.recordUse(input).catch(skillError),
+    });
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
@@ -397,12 +418,78 @@ export async function buildApp(deps: AppDeps) {
       ch(req).close(channelInputs.close.parse({ ...body(req), channel_id: id(req) })),
     );
   }
+  // Skills: approved versions only.
+  const skills = (req: FastifyRequest) => skillHandlers(deps.db, req.agent!, sourceOf(req));
+  app.get("/v1/skills", { preHandler: requireAgent }, async (req) => {
+    const q = req.query as Record<string, string | undefined>;
+    return skills(req).search(
+      searchSkillsInput.parse({
+        query: q.q,
+        category: q.category,
+        limit: q.limit ? Number(q.limit) : undefined,
+      }),
+    );
+  });
+  // Before /v1/skills/:id, so "subscribed" isn't read as an id.
+  app.get("/v1/skills/subscribed", { preHandler: requireAgent }, async (req) =>
+    skills(req).subscribed(),
+  );
+  app.get("/v1/skills/:id", { preHandler: requireAgent }, async (req) =>
+    skills(req).get(getSkillInput.parse({ skill_id: (req.params as { id: string }).id })),
+  );
+  app.post("/v1/skills/:id/uses", { preHandler: requireAgent }, async (req, reply) => {
+    const input = recordSkillUseInput.parse({
+      ...(req.body as object),
+      skill_id: (req.params as { id: string }).id,
+    });
+    const out = await skills(req).recordUse(input);
+    return reply.code(out.recorded ? 201 : 200).send(out);
+  });
+
   // Lets the bridge check a key at login. Ids and scopes only.
   app.get("/v1/whoami", { preHandler: requireAgent }, async (req) => ({
     agent_id: req.agent!.agentId,
     scopes: req.agent!.scopes,
     capture_opt_out: req.agent!.captureOptOut,
   }));
+
+  if (deps.slackSigningSecret) {
+    const secret = deps.slackSigningSecret;
+    // Button clicks from Slack. The signature covers the raw form body, so keep it.
+    await app.register(async (scope) => {
+      scope.addContentTypeParser(
+        "application/x-www-form-urlencoded",
+        { parseAs: "string" },
+        (_req, body, done) => done(null, body),
+      );
+      scope.post(
+        "/webhooks/slack/interactions",
+        { config: { rateLimit: { max: 6000, timeWindow: "1 minute" } } },
+        async (req, reply) => {
+          const body = typeof req.body === "string" ? req.body : "";
+          const ok = verifySlackRequest(
+            secret,
+            {
+              timestamp: String(req.headers["x-slack-request-timestamp"] ?? ""),
+              signature: String(req.headers["x-slack-signature"] ?? ""),
+            },
+            body,
+          );
+          if (!ok) return reply.code(401).send({ error: "bad_signature" });
+          const payload = parseInteraction(body);
+          if (!payload) return reply.code(400).send({ error: "invalid_payload" });
+          const result = await handleInteraction({ db: deps.db }, payload);
+          if (result) {
+            // Slack wants an answer within 3 seconds; the message update can follow.
+            void respond(result, deps.slackResponseOrigins).catch((err) =>
+              req.log.warn({ err: (err as Error).message }, "slack response failed"),
+            );
+          }
+          return reply.code(200).send();
+        },
+      );
+    });
+  }
 
   if (deps.githubWebhookSecret) {
     const secret = deps.githubWebhookSecret;

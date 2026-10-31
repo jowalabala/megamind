@@ -1,5 +1,5 @@
 import { parse } from "yaml";
-import { ENGINEERING_PACK, GENERIC_PACK } from "./builtin.ts";
+import { ENGINEERING_PACK, GENERIC_PACK, REVENUE_PACK } from "./builtin.ts";
 import { packSchema, type Pack } from "./schema.ts";
 
 export class PackError extends Error {
@@ -23,5 +23,5 @@ export function parsePack(yamlText: string): Pack {
 }
 
 export function builtinPacks(): Pack[] {
-  return [parsePack(ENGINEERING_PACK), parsePack(GENERIC_PACK)];
+  return [parsePack(ENGINEERING_PACK), parsePack(REVENUE_PACK), parsePack(GENERIC_PACK)];
 }

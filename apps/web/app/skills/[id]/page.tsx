@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { canReview, getSkill } from "@mm/skills";
+import { canReview, getSkill, latestMeasurements } from "@mm/skills";
 import { requireMemberContext } from "../../../lib/context";
 import { db } from "../../../lib/db";
 import { TopBar } from "../../top-bar";
@@ -13,10 +13,24 @@ export default async function SkillPage({ params }: { params: Promise<{ id: stri
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const data = await db().withTenant(ctx.tenantId, async (tx) => {
     const s = await getSkill(tx, id);
-    return s ? { ...s, mayReview: await canReview(tx, ctx.member.id, s.skill) } : null;
+    return s
+      ? {
+          ...s,
+          mayReview: await canReview(tx, ctx.member.id, s.skill),
+          measurements: await latestMeasurements(tx, id, 5),
+        }
+      : null;
   });
   if (!data) notFound();
-  const { skill, versions, reviews, evidence, mayReview } = data;
+  const { skill, versions, reviews, evidence, mayReview, measurements } = data;
+  const served = skill.status !== "retired" && skill.approvedVersion !== null;
+  const pct = (x: number | null) => (x === null ? "–" : `${Math.round(x * 100)}%`);
+  const STATUS: Record<string, string> = {
+    insufficient: "too little data yet",
+    no_effect: "no clear difference",
+    improves: "helps",
+    degrades: "hurts",
+  };
   const current = versions[0]!;
   const byId = new Map(evidence.map((e) => [e.id, e]));
   const gate = current.gate as {
@@ -40,7 +54,19 @@ export default async function SkillPage({ params }: { params: Promise<{ id: stri
               ? ` · agents get v${skill.approvedVersion}`
               : " · not served yet"}
           </span>
+          {served && (
+            <>
+              {" "}
+              · <a href={`/skills/${skill.id}/skill.md`}>Download SKILL.md</a>
+            </>
+          )}
         </p>
+        {skill.flaggedAt && (
+          <p className="error">
+            Flagged {skill.flaggedAt.toISOString().slice(0, 10)}: {skill.flagReason} It&apos;s still
+            served until a reviewer decides.
+          </p>
+        )}
         <div className="card">
           <p>
             <strong>When:</strong> {current.body.when_to_use}
@@ -86,6 +112,53 @@ export default async function SkillPage({ params }: { params: Promise<{ id: stri
           </p>
         </div>
 
+        <h2>Results</h2>
+        <div className="card">
+          {measurements.length === 0 ? (
+            <p className="muted">
+              Not measured yet. Once agents report using this skill (skills_used in log_task),
+              judged work that followed it is compared with work that didn&apos;t.
+            </p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Measured</th>
+                  <th>Version</th>
+                  <th>Followed it</th>
+                  <th>Didn&apos;t</th>
+                  <th>Difference (95% range)</th>
+                  <th>Verdict</th>
+                </tr>
+              </thead>
+              <tbody>
+                {measurements.map((m) => (
+                  <tr key={m.id}>
+                    <td className="muted">{m.measuredAt.toISOString().slice(0, 10)}</td>
+                    <td>v{m.version}</td>
+                    <td>
+                      {m.usedSuccess}/{m.usedN} succeeded
+                    </td>
+                    <td>
+                      {m.baseSuccess}/{m.baseN} succeeded
+                    </td>
+                    <td>
+                      {m.lift === null
+                        ? "–"
+                        : `${m.lift > 0 ? "+" : ""}${pct(m.lift)} (${pct(m.ciLow)} to ${pct(m.ciHigh)})`}
+                    </td>
+                    <td>{STATUS[m.status] ?? m.status}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <p className="muted">
+            Last {measurements[0]?.windowDays ?? 90} days, same category. A comparison of outcomes,
+            not proof of cause.
+          </p>
+        </div>
+
         {mayReview && (
           <>
             <h2>Review</h2>
@@ -103,7 +176,12 @@ export default async function SkillPage({ params }: { params: Promise<{ id: stri
                     </button>
                   </>
                 )}
-                {skill.status === "approved" && (
+                {skill.status === "approved" && skill.flaggedAt && (
+                  <button type="submit" name="action" value="approve">
+                    Keep serving v{skill.approvedVersion}
+                  </button>
+                )}
+                {skill.status !== "retired" && skill.approvedVersion !== null && (
                   <button type="submit" name="action" value="retire" className="danger">
                     Retire
                   </button>

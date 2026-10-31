@@ -172,9 +172,12 @@ describe("remote MCP", () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
       "announce_intent",
       "check_overlaps",
+      "get_skill",
       "log_task",
+      "record_skill_use",
       "report_outcome",
       "search_history",
+      "search_skills",
       "whats_happening",
     ]);
     expect(tools.find((t) => t.name === "search_history")!.annotations?.readOnlyHint).toBe(true);
@@ -399,7 +402,7 @@ describe("search_history (week 3)", () => {
     });
     expect(await res.json()).toEqual({
       agent_id: expect.any(String),
-      scopes: ["capture:write", "history:read", "collab"],
+      scopes: ["capture:write", "history:read", "skills:read", "collab"],
       capture_opt_out: false,
     });
   });

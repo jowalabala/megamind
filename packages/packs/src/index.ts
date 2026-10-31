@@ -32,3 +32,11 @@ export {
   type Verdict,
 } from "./judge.ts";
 export { judgeSweep, replayJudgments, type JudgeDeps, type ReplayMismatch } from "./judge-job.ts";
+export {
+  ATTRIBUTION_MIN_CONFIDENCE,
+  attributeTasks,
+  HEURISTIC,
+  heuristicConfidence,
+  jaccard,
+  titleWords,
+} from "./attribution.ts";

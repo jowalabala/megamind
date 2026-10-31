@@ -18,7 +18,17 @@ import {
   startPendingBackfills,
 } from "@mm/github";
 import { bedrockTransport, createLlm, dbCallLogger, modelConfigFromEnv } from "@mm/llm";
-import { builtinPacks, categorizeTask, judgeSweep, type CategorizeJob } from "@mm/packs";
+import {
+  attributeTasks,
+  builtinPacks,
+  categorizeTask,
+  judgeSweep,
+  type CategorizeJob,
+} from "@mm/packs";
+import { finalizeSequenceOutcomes, hubspotConfigFromEnv, syncHubspot } from "@mm/hubspot";
+import { measureSkills } from "@mm/skills";
+import { sendNotifications } from "@mm/slack";
+import { vaultFromEnv } from "@mm/vault";
 import { expireChannels } from "@mm/collab";
 import { comprehendDetector } from "@mm/privacy/comprehend";
 
@@ -104,6 +114,26 @@ const githubDeps =
     : null;
 if (githubDeps) await startGithubWorkers(queue, githubDeps);
 
+// OAuth tokens (HubSpot, Slack) are sealed with KMS in AWS, a local key in development.
+const vault = vaultFromEnv();
+const webUrl = process.env.MM_WEB_URL ?? "http://localhost:3000";
+
+// HubSpot connector, when the app is configured.
+const hubspotConfig = hubspotConfigFromEnv();
+const hubspotDeps =
+  hubspotConfig && vault
+    ? {
+        db,
+        vault,
+        redactorFor,
+        log,
+        config: hubspotConfig,
+        enqueue: async (name: "categorize.task", data: object, options?: { id?: string }) => {
+          await queue.send(name, data, options);
+        },
+      }
+    : null;
+
 // The lake: Firehose + Athena in AWS, newline-delimited JSON files in development.
 const stream = process.env.MM_LAKE_FIREHOSE_STREAM;
 const tableBucketArn = process.env.MM_LAKE_TABLE_BUCKET_ARN;
@@ -165,12 +195,34 @@ const timers = [
   ...(githubDeps
     ? [every("github.backfills", 30_000, () => startPendingBackfills(githubDeps))]
     : []),
-  // Outcomes: trace fixes (needs GitHub), finalize mature PR metrics, then judge.
+  ...(hubspotDeps
+    ? [
+        every("hubspot.sync", 30 * 60_000, async () => {
+          for (const t of await db.system.listTenantsForJobs()) {
+            await syncHubspot(hubspotDeps, t.tenantId);
+          }
+        }),
+      ]
+    : []),
+  // Outcomes: trace fixes (needs GitHub), finalize mature PR and sequence metrics, judge,
+  // attribute agent tasks to what they produced, then measure the served skills.
   every("outcomes", 10 * 60_000, async () => {
     for (const t of await db.system.listTenantsForJobs()) {
       if (githubDeps) await runSzzSweep(githubDeps, t.tenantId);
       await finalizeMetrics({ db, log }, t.tenantId);
+      if (hubspotDeps) await finalizeSequenceOutcomes(hubspotDeps, t.tenantId);
       await judgeSweep({ db, packs, log }, t.tenantId);
+      await attributeTasks({ db }, t.tenantId);
+      await measureSkills({ db, log }, t.tenantId);
+    }
+  }),
+  // Notifications go out as Slack DMs where Slack is connected.
+  every("notifications", 5_000, async () => {
+    for (const t of await db.system.listTenantsForJobs()) {
+      await sendNotifications(
+        { db, vault, webUrl, slackBaseUrl: process.env.MM_SLACK_API_URL || undefined, log },
+        t.tenantId,
+      );
     }
   }),
   every("channels.expire", 60_000, async () => {
@@ -191,6 +243,8 @@ log("worker.started", {
   comprehend: process.env.MM_PII_COMPREHEND === "on",
   lake: stream ? "firehose" : "local",
   github: Boolean(githubDeps),
+  hubspot: Boolean(hubspotDeps),
+  vault: process.env.MM_VAULT_KMS_KEY_ID ? "kms" : vault ? "local" : "none",
   llm: Boolean(llm),
 });
 

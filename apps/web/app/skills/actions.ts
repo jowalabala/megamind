@@ -1,7 +1,7 @@
 "use server";
 
 import { REVIEW_ACTIONS } from "@mm/db";
-import { reviewSkill, setCategoryOwner } from "@mm/skills";
+import { reviewSkill, setCategoryOwner, setSubscription } from "@mm/skills";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireMemberContext } from "../../lib/context";
@@ -40,4 +40,25 @@ export async function assignOwner(formData: FormData): Promise<void> {
     }),
   );
   revalidatePath("/skills/review");
+}
+
+/** Follow a category: its approved skills reach your agents (bridge) and changes reach you (Slack). */
+export async function subscribe(formData: FormData): Promise<void> {
+  const ctx = await requireMemberContext();
+  const input = z
+    .object({
+      pack: z.string().regex(/^[a-z][a-z0-9_]{0,31}$/),
+      category: z.string().regex(/^(\*|[a-z][a-z0-9_]{0,63})$/),
+      on: z.enum(["true", "false"]),
+    })
+    .parse(Object.fromEntries(formData));
+  await db().withTenant(ctx.tenantId, (tx) =>
+    setSubscription(tx, ctx.tenantId, {
+      memberId: ctx.member.id,
+      pack: input.pack,
+      category: input.category,
+      on: input.on === "true",
+    }),
+  );
+  revalidatePath("/skills");
 }

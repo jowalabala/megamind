@@ -32,3 +32,4 @@ export {
 } from "./process.ts";
 export { tenantRedactors, type RedactorFor, type TenantRedactorsOptions } from "./redaction.ts";
 export * from "./schemas.ts";
+export { recordSkillUses, type SkillUse } from "./skill-usage.ts";

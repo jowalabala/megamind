@@ -119,6 +119,19 @@ export const LAKE_TABLE_DEFS: Record<LakeTableName, LakeTableDef> = {
     ],
     partitions: byDay,
   },
+  skill_usage: {
+    name: "skill_usage",
+    columns: [
+      ...common,
+      { name: "skill_id", type: "string", required: true },
+      { name: "version", type: "int", required: true },
+      { name: "task_id", type: "string" },
+      { name: "session_id", type: "string" },
+      { name: "adherence", type: "string", required: true },
+      ...times,
+    ],
+    partitions: byDay,
+  },
   metric_observations: {
     name: "metric_observations",
     columns: [

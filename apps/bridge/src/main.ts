@@ -7,6 +7,7 @@ import { hooksInstalled, install, uninstall } from "./install.ts";
 import { runMcpServer } from "./mcp.ts";
 import { repoInfo } from "./git.ts";
 import { runPresence } from "./presence.ts";
+import { skillsDir, syncSkills } from "./skills.ts";
 import { flush, pendingCount } from "./spool.ts";
 
 const HELP = `mm ${VERSION} - Master Mind local bridge
@@ -15,6 +16,7 @@ const HELP = `mm ${VERSION} - Master Mind local bridge
   mm install [--dry-run]     Add capture hooks to Claude Code and register the MCP server
   mm status                  Show what's configured and what's waiting to be sent
   mm flush                   Send captured actions now
+  mm skills sync             Install your team's approved skills into ~/.claude/skills
   mm uninstall               Remove the hooks and the MCP server
   mm logout                  Delete the stored key
 
@@ -159,6 +161,28 @@ async function main(argv: string[]): Promise<number> {
       const r = await flush(createApi(cfg.apiUrl, key.key));
       console.log(`Sent ${r.sent} action(s); ${r.kept} still waiting.`);
       return r.kept ? 1 : 0;
+    }
+    case "skills": {
+      if (args[0] !== "sync") {
+        console.log("Usage: mm skills sync");
+        return 1;
+      }
+      const cfg = readConfig();
+      const key = cfg && loadKey(cfg.apiUrl);
+      if (!cfg || !key) {
+        console.error("Not logged in. Run mm login.");
+        return 1;
+      }
+      const r = await syncSkills(createApi(cfg.apiUrl, key.key));
+      console.log(
+        `${r.skills.length} skill(s) in ${skillsDir()}: ${r.written.length} updated, ${r.removed.length} removed.`,
+      );
+      if (r.skills.length === 0) {
+        console.log(
+          "Subscribe to categories on the Skills page in Master Mind to get skills here.",
+        );
+      }
+      return 0;
     }
     case "status": {
       const cfg = readConfig();

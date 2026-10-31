@@ -24,6 +24,8 @@
     "tsx": "^4.20.0"
   },
   "exports": {
-    "./presence": "./src/presence.ts"
+    "./api": "./src/api.ts",
+    "./presence": "./src/presence.ts",
+    "./skills": "./src/skills.ts"
   }
 }

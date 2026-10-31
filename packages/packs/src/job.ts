@@ -65,7 +65,8 @@ export async function categorizeTask(
   const input: CategorizeInput = {
     title: task.titleRedacted,
     summary: task.summaryRedacted,
-    labels: pr?.labels ?? [],
+    labels:
+      pr?.labels ?? (Array.isArray(task.features.labels) ? (task.features.labels as string[]) : []),
     branch: pr?.headRefRedacted ?? (session?.context?.branch as string | undefined) ?? null,
     files: pr?.files.map((f) => f.path) ?? [],
     authorIsBot: pr?.authorIsBot ?? false,

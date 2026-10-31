@@ -166,6 +166,27 @@ async function seedTenant(slug: string) {
     await tx.execute(sql`
       INSERT INTO erasure_requests (tenant_id, subject_member_id, requested_by_member_id)
       VALUES (${t.tenantId}, gen_random_uuid(), ${t.adminMemberId})`);
+    await tx.execute(sql`
+      INSERT INTO connection_secrets (tenant_id, connection_id, kind, sealed)
+      VALUES (${t.tenantId}, ${conn!.id}, 'refresh_token', 'l1.sealed')`);
+    await tx.execute(sql`
+      INSERT INTO hubspot_sequences (tenant_id, task_id, connection_id, sequence_id, created_at_hs, updated_at_hs)
+      VALUES (${t.tenantId}, ${prTask}, ${conn!.id}, '1', now(), now())`);
+    await tx.execute(sql`
+      INSERT INTO task_attributions (tenant_id, task_id, target_task_id, method, confidence)
+      VALUES (${t.tenantId}, ${taskId}, ${prTask}, 'reference', 1)`);
+    await tx.execute(sql`
+      INSERT INTO skill_subscriptions (tenant_id, member_id, pack, category)
+      VALUES (${t.tenantId}, ${member.id}, 'engineering', '*')`);
+    await tx.execute(sql`
+      INSERT INTO skill_usage (id, tenant_id, skill_id, version, task_id, member_id, used_at)
+      VALUES (gen_random_uuid(), ${t.tenantId}, ${skillId}, 1, ${taskId}, ${member.id}, now())`);
+    await tx.execute(sql`
+      INSERT INTO skill_measurements (tenant_id, skill_id, window_days, used_n, used_success, base_n, base_success, status)
+      VALUES (${t.tenantId}, ${skillId}, 90, 0, 0, 0, 0, 'insufficient')`);
+    await tx.execute(sql`
+      INSERT INTO notifications (tenant_id, member_id, kind)
+      VALUES (${t.tenantId}, ${member.id}, 'skill_review')`);
     return {
       tenantId: t.tenantId,
       teamId: team!.id,
@@ -363,7 +384,7 @@ describe("agent keys", () => {
       tenantId: A.tenantId,
       agentId: A.agentId,
       memberId: A.memberId,
-      scopes: ["capture:write", "history:read", "collab"],
+      scopes: ["capture:write", "history:read", "skills:read", "collab"],
       captureOptOut: false,
     });
     expect((await db.system.authenticateAgent(B.agentKey))?.tenantId).toBe(B.tenantId);
