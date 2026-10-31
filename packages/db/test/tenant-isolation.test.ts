@@ -126,6 +126,31 @@ async function seedTenant(slug: string) {
     await tx.execute(sql`
       INSERT INTO skill_versions (tenant_id, skill_id, version, title, body, evidence, gate)
       VALUES (${t.tenantId}, ${skillId}, 1, 'Seed skill', '{}', '{}', '{}')`);
+    await tx.execute(sql`INSERT INTO collab_settings (tenant_id) VALUES (${t.tenantId})`);
+    await tx.execute(sql`
+      INSERT INTO collab_preapprovals (tenant_id, member_id) VALUES (${t.tenantId}, ${member.id})`);
+    const channelId = crypto.randomUUID();
+    await tx.execute(sql`
+      INSERT INTO channels (id, tenant_id, purpose_redacted, scope, requested_by)
+      VALUES (${channelId}, ${t.tenantId}, 'Seed channel', '{}', ${session!.id})`);
+    await tx.execute(sql`
+      INSERT INTO channel_participants (tenant_id, channel_id, session_id, member_id)
+      VALUES (${t.tenantId}, ${channelId}, ${session!.id}, ${member.id})`);
+    await tx.execute(sql`
+      INSERT INTO channel_messages (tenant_id, channel_id, seq, id, from_session, type, body_redacted)
+      VALUES (${t.tenantId}, ${channelId}, 1, gen_random_uuid(), ${session!.id}, 'note', 'hi')`);
+    await tx.execute(sql`
+      INSERT INTO leases (tenant_id, resource, holder_session, channel_id, expires_at)
+      VALUES (${t.tenantId}, 'git:x:y', ${session!.id}, ${channelId}, now() + interval '1 hour')`);
+    await tx.execute(sql`
+      INSERT INTO agreements (tenant_id, channel_id, version, body_redacted, proposed_by)
+      VALUES (${t.tenantId}, ${channelId}, 1, 'Seed agreement', ${session!.id})`);
+    await tx.execute(sql`
+      INSERT INTO category_owners (tenant_id, member_id, pack, category)
+      VALUES (${t.tenantId}, ${member.id}, 'engineering', 'bugfix')`);
+    await tx.execute(sql`
+      INSERT INTO skill_reviews (tenant_id, skill_id, version, action, member_id)
+      VALUES (${t.tenantId}, ${skillId}, 1, 'approve', ${member.id})`);
     await tx.execute(sql`
       INSERT INTO skill_drafts (id, tenant_id, pack, category, window_to, title, body, cohort, prompt_id, prompt_version)
       VALUES (gen_random_uuid(), ${t.tenantId}, 'engineering', 'bugfix', now(), 'Seed skill', '{}', '{}', 'skills.extract', 1)`);

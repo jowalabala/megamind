@@ -14,6 +14,7 @@
     "@fastify/rate-limit": "^11.0.0",
     "@mm/audit": "workspace:*",
     "@mm/awareness": "workspace:*",
+    "@mm/collab": "workspace:*",
     "@mm/db": "workspace:*",
     "@mm/github": "workspace:*",
     "@mm/ingest": "workspace:*",
@@ -24,6 +25,9 @@
     "zod": "^4.1.0"
   },
   "devDependencies": {
+    "@mm/bridge": "workspace:*",
+    "@mm/gateway": "workspace:*",
+    "@mm/lake": "workspace:*",
     "tsx": "^4.20.0"
   }
 }

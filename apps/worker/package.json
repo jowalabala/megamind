@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@mm/collab": "workspace:*",
     "@mm/db": "workspace:*",
     "@mm/github": "workspace:*",
     "@mm/ingest": "workspace:*",

@@ -17,6 +17,7 @@ import {
   type MasterMindDb,
 } from "@mm/db";
 import { ALERT_CHANNEL, alertsFor, describeAlert, markDelivered } from "@mm/awareness";
+import { CHANNEL_NOTIFY } from "@mm/collab";
 import { listen, type Listener } from "@mm/db/notify";
 import type { RedactorFor } from "@mm/ingest";
 import {
@@ -26,6 +27,7 @@ import {
   PROTOCOL,
   TOKEN_PROTOCOL_PREFIX,
   verifyGatewayToken,
+  type ChannelEvent,
   type GatewayClaims,
   type ServerMessage,
 } from "@mm/realtime";
@@ -119,6 +121,69 @@ export async function createGateway(options: GatewayOptions) {
     }
   }
 
+  /** Channel status changes and new messages from the other side, once each per session. */
+  async function pushChannels(tenantId: string) {
+    for (const c of byTenant(tenantId)) {
+      await options.db.withTenant(tenantId, async (tx) => {
+        const rows = await tx.execute<{
+          channel_id: string;
+          status: string;
+          purpose: string;
+          approval: string;
+          delivered_seq: number;
+          delivered_status: string | null;
+        }>(sql`
+          SELECT ch.id AS channel_id, ch.status, ch.purpose_redacted AS purpose, p.approval,
+                 p.delivered_seq, p.delivered_status
+            FROM channel_participants p JOIN channels ch ON ch.id = p.channel_id
+           WHERE p.session_id = ${c.sessionId}`);
+        const events: ChannelEvent[] = [];
+        for (const r of rows.rows) {
+          if (r.status !== r.delivered_status) {
+            const waiting = r.status === "requested" && r.approval === "pending";
+            const text =
+              r.status === "requested"
+                ? `A channel was requested: "${r.purpose}". It opens once both people approve in Master Mind${waiting ? " (your person hasn't yet)" : ""}.`
+                : r.status === "open"
+                  ? `Channel ${r.channel_id} is open: "${r.purpose}". Use channel_read and channel_send.`
+                  : `Channel ${r.channel_id} is ${r.status}.`;
+            events.push({
+              kind: "status",
+              channel_id: r.channel_id,
+              status: r.status,
+              purpose: r.purpose,
+              waiting_for_you: waiting,
+              text,
+            });
+          }
+          const msgs = await tx.execute<{ seq: number; type: string; body: string }>(sql`
+            SELECT seq, type, body_redacted AS body FROM channel_messages
+             WHERE channel_id = ${r.channel_id} AND seq > ${r.delivered_seq} AND from_session <> ${c.sessionId}
+             ORDER BY seq LIMIT 50`);
+          for (const m of msgs.rows) {
+            events.push({
+              kind: "message",
+              channel_id: r.channel_id,
+              seq: Number(m.seq),
+              type: m.type,
+              body: m.body,
+              text: `Untrusted message from the other agent in channel ${r.channel_id} (${m.type}): ${m.body}`,
+            });
+          }
+          const maxSeq = Math.max(Number(r.delivered_seq), ...msgs.rows.map((m) => Number(m.seq)));
+          await tx.execute(sql`
+            UPDATE channel_participants SET delivered_status = ${r.status},
+                   delivered_seq = GREATEST(delivered_seq, ${maxSeq},
+                     (SELECT coalesce(max(seq), 0) FROM channel_messages
+                       WHERE channel_id = ${r.channel_id} AND from_session = ${c.sessionId}))
+             WHERE channel_id = ${r.channel_id} AND session_id = ${c.sessionId}`);
+        }
+        if (events.length && c.ws.readyState === WebSocket.OPEN)
+          send(c, { type: "channel", events });
+      });
+    }
+  }
+
   const notify = (tenantId: string) =>
     options.db.withTenant(tenantId, (tx) =>
       tx.execute(sql`SELECT pg_notify(${CHANNEL}, ${tenantId})`),
@@ -158,6 +223,25 @@ export async function createGateway(options: GatewayOptions) {
       }
       void pushAlerts(payload).catch((e: Error) =>
         log("gateway.alert_error", { message: e.message }),
+      );
+    },
+  );
+
+  const channelListener: Listener = await listen(
+    {
+      connectionString: options.listenUrl,
+      ssl: options.ssl,
+      onError: (e) => log("gateway.listen_error", { message: e.message }),
+    },
+    CHANNEL_NOTIFY,
+    (payload) => {
+      try {
+        assertTenantId(payload);
+      } catch {
+        return;
+      }
+      void pushChannels(payload).catch((e: Error) =>
+        log("gateway.channel_error", { message: e.message }),
       );
     },
   );
@@ -240,6 +324,7 @@ export async function createGateway(options: GatewayOptions) {
       await pushTenant(tenantId);
       // Anything that came up while this session was disconnected.
       await pushAlerts(tenantId);
+      await pushChannels(tenantId);
       return;
     }
     if (!c.sessionId) return c.ws.close(CLOSE.badMessage, "hello first");
@@ -320,6 +405,7 @@ export async function createGateway(options: GatewayOptions) {
       for (const c of conns) c.ws.close(1001, "shutting down");
       await listener.close();
       await alertListener.close();
+      await channelListener.close();
       await new Promise<void>((r) => wss.close(() => r()));
       await new Promise<void>((r) => server.close(() => r()));
     },

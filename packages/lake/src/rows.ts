@@ -187,3 +187,31 @@ export function judgmentRecord(
     },
   };
 }
+
+export function channelMessageRecord(
+  m: Base & {
+    id: string;
+    channelId: string;
+    seq: number;
+    sessionId: string;
+    type: string;
+    body: string;
+    sentAt: Date;
+  },
+): LakeRecord {
+  return {
+    table: "channel_messages",
+    eventId: m.id,
+    memberId: m.memberId,
+    row: {
+      event_id: m.id,
+      ...base(m),
+      channel_id: m.channelId,
+      seq: m.seq,
+      session_id: m.sessionId,
+      type: m.type,
+      body: m.body,
+      event_time: iso(m.sentAt),
+    },
+  };
+}

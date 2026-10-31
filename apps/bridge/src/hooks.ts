@@ -10,6 +10,7 @@ import {
   requestStop,
   startPresenceDaemon,
   takeAlerts,
+  takeChannelEvents,
   touchAlive,
 } from "./presence.ts";
 import { append, flush, flushDue } from "./spool.ts";
@@ -62,7 +63,9 @@ export async function runHook(name: HookName, payload: HookPayload): Promise<str
 
     if (name === "user-prompt-submit") {
       const context = sessionId
-        ? [takeAlerts(sessionId), presenceContext(sessionId)].filter(Boolean).join("\n\n") || null
+        ? [takeAlerts(sessionId), takeChannelEvents(sessionId), presenceContext(sessionId)]
+            .filter(Boolean)
+            .join("\n\n") || null
         : null;
       return context
         ? JSON.stringify({
@@ -76,7 +79,8 @@ export async function runHook(name: HookName, payload: HookPayload): Promise<str
       if (!sessionId) return null;
       touchAlive(sessionId);
       // Overlap alerts reach the agent on its next tool call, not only its next prompt.
-      const alerts = takeAlerts(sessionId);
+      const alerts =
+        [takeAlerts(sessionId), takeChannelEvents(sessionId)].filter(Boolean).join("\n\n") || null;
       if (alerts) {
         reply = JSON.stringify({
           hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: alerts },

@@ -11,7 +11,9 @@
   },
   "dependencies": {
     "@mm/audit": "workspace:*",
+    "@mm/collab": "workspace:*",
     "@mm/db": "workspace:*",
+    "@mm/skills": "workspace:*",
     "@workos-inc/authkit-nextjs": "^2.17.0",
     "@workos-inc/node": "^8.0.0",
     "next": "~15.5.28",

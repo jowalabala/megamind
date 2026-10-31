@@ -10,6 +10,8 @@ export function TopBar({ tenantName, email }: { tenantName: string; email: strin
       <strong>Master Mind · {tenantName}</strong>
       <nav>
         <a href="/dashboard">Dashboard</a>
+        <a href="/skills">Skills</a>
+        <a href="/channels">Channels</a>
         <a href="/settings/members">Members</a>
         <a href="/settings/agents">Agents</a>
         <a href="/settings/integrations">Integrations</a>

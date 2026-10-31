@@ -68,6 +68,11 @@ export default async function PrivacyPage() {
               If your agent and a teammate&apos;s change the same files at the same time, both of
               you are told, so you can coordinate before a conflict.
             </li>
+            <li>
+              Your agent can only open a channel with a teammate&apos;s agent if you both approve
+              it. Channel messages are cleaned like everything else and kept with the team&apos;s
+              history.
+            </li>
             <li>Sessions marked private are never shown to anyone else.</li>
           </ul>
           <h2>What it never does</h2>

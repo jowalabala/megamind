@@ -1,8 +1,10 @@
 // `mm mcp`: a local stdio MCP server for Claude Code and other IDE agents. Same tools as
 // the remote server; secrets are stripped here before anything is sent.
 import {
+  ChannelToolError,
   registerAwarenessTools,
   registerCaptureTools,
+  registerChannelTools,
   registerHistoryTools,
   SERVER_INFO,
   SERVER_INSTRUCTIONS,
@@ -97,6 +99,33 @@ export function createBridgeServer(): McpServer {
           `/v1/overlaps?session_id=${encodeURIComponent(session().sessionId)}`,
         ),
       ),
+  });
+  // Channels: the bridge knows this session, so agents never pass it.
+  const ch =
+    <T>(method: "GET" | "POST", path: (i: T) => string, body?: (i: T) => object) =>
+    (i: T) =>
+      call(async (api) => {
+        const s = session();
+        try {
+          return method === "GET"
+            ? await api.get(
+                `${path(i)}${path(i).includes("?") ? "&" : "?"}session_id=${encodeURIComponent(s.sessionId)}`,
+              )
+            : await api.post(path(i), { ...(body ? body(i) : i), session_id: s.sessionId });
+        } catch (err) {
+          if (err instanceof ApiError) throw new ChannelToolError(err.message);
+          throw err;
+        }
+      });
+  registerChannelTools(server, {
+    request: ch("POST", () => "/v1/channels"),
+    send: ch("POST", (i) => `/v1/channels/${i.channel_id}/messages`),
+    read: ch("GET", (i) => `/v1/channels/${i.channel_id}?after_seq=${i.after_seq}`),
+    claim: ch("POST", (i) => `/v1/channels/${i.channel_id}/claims`),
+    release: ch("POST", (i) => `/v1/channels/${i.channel_id}/releases`),
+    propose: ch("POST", (i) => `/v1/channels/${i.channel_id}/agreements`),
+    accept: ch("POST", (i) => `/v1/channels/${i.channel_id}/agreements/${i.version}/accept`),
+    close: ch("POST", (i) => `/v1/channels/${i.channel_id}/close`),
   });
   registerHistoryTools(server, {
     searchHistory: (input) =>

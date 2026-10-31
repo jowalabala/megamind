@@ -31,10 +31,16 @@ import {
   type AcceptDeps,
   type AcceptResult,
   type IngestSource,
+  type RedactorFor,
 } from "@mm/ingest";
+import { CollabError } from "@mm/collab";
+import { channelHandlers, STATUS } from "./channels.ts";
 import {
+  ChannelToolError,
+  channelInputs,
   registerAwarenessTools,
   registerCaptureTools,
+  registerChannelTools,
   registerHistoryTools,
   searchHistoryInput,
   SERVER_INFO,
@@ -55,6 +61,10 @@ export interface AppDeps extends AcceptDeps {
   gatewaySecret?: string;
   /** Public URL of the gateway, e.g. wss://app.example.com (the bridge connects to <url>/ws). */
   gatewayUrl?: string;
+  /** Redacts channel text (deterministic layers). Without it channels are unavailable. */
+  redactorFor?: RedactorFor;
+  /** The web app's URL, for approval links. */
+  webUrl?: string;
   /** GitHub App webhook secret. Without it the webhook endpoint is not mounted. */
   githubWebhookSecret?: string;
   logger?: boolean | object;
@@ -182,6 +192,11 @@ export async function buildApp(deps: AppDeps) {
     if (err instanceof IngestForbiddenError) {
       return reply.code(403).send({ error: "forbidden", message: err.message });
     }
+    if (err instanceof CollabError) {
+      return reply
+        .code(STATUS[err.code])
+        .send({ error: err.code, message: err.message, ...err.detail });
+    }
     const status = err.statusCode;
     if (status && status < 500) return reply.code(status).send({ error: err.message });
     req.log.error({ err }, "request failed");
@@ -220,6 +235,29 @@ export async function buildApp(deps: AppDeps) {
         }),
       checkOverlaps: (input) => checkOverlaps(deps.db, agent, input.session_id).catch(userError),
     });
+    if (deps.redactorFor) {
+      const ch = channelHandlers(
+        { db: deps.db, redactorFor: deps.redactorFor, webUrl: deps.webUrl },
+        agent,
+      );
+      const wrap =
+        <A>(fn: (a: A) => Promise<unknown>) =>
+        (a: A) =>
+          fn(a).catch((err) => {
+            if (err instanceof CollabError) throw new ChannelToolError(err.message);
+            throw err;
+          });
+      registerChannelTools(server, {
+        request: wrap(ch.request),
+        send: wrap(ch.send),
+        read: wrap(ch.read),
+        claim: wrap(ch.claim),
+        release: wrap(ch.release),
+        propose: wrap(ch.propose),
+        accept: wrap(ch.accept),
+        close: wrap(ch.close),
+      });
+    }
     registerHistoryTools(server, {
       searchHistory: (input) =>
         searchHistory(deps.db, agent, input).catch((err) => {
@@ -299,6 +337,66 @@ export async function buildApp(deps: AppDeps) {
     });
     return { token, expires_at: expiresAt.toISOString(), gateway_url: deps.gatewayUrl };
   });
+  // Channels. People approve them in the web app; agent keys never can.
+  const refuseAgents = async (_req: FastifyRequest, reply: FastifyReply) =>
+    reply.code(403).send({
+      error: "forbidden",
+      message: "Channels are approved by a person in Master Mind, never by an agent.",
+    });
+  app.post("/v1/channels/:id/approve", { preHandler: requireAgent }, refuseAgents);
+  app.post("/v1/channels/:id/decline", { preHandler: requireAgent }, refuseAgents);
+  if (deps.redactorFor) {
+    const ch = (req: FastifyRequest) =>
+      channelHandlers(
+        { db: deps.db, redactorFor: deps.redactorFor!, webUrl: deps.webUrl },
+        req.agent!,
+      );
+    const id = (req: FastifyRequest) => (req.params as { id: string }).id;
+    const body = (req: FastifyRequest) => (req.body ?? {}) as Record<string, unknown>;
+    app.post("/v1/channels", { preHandler: requireAgent }, async (req, reply) =>
+      reply.code(201).send(await ch(req).request(channelInputs.request.parse(req.body))),
+    );
+    app.get("/v1/channels/:id", { preHandler: requireAgent }, async (req) => {
+      const q = req.query as Record<string, string>;
+      return ch(req).read(
+        channelInputs.read.parse({
+          channel_id: id(req),
+          session_id: q.session_id,
+          after_seq: q.after_seq ? Number(q.after_seq) : 0,
+        }),
+      );
+    });
+    app.post("/v1/channels/:id/messages", { preHandler: requireAgent }, async (req, reply) => {
+      const out = (await ch(req).send(
+        channelInputs.send.parse({ ...body(req), channel_id: id(req) }),
+      )) as { status: string };
+      return reply.code(out.status === "blocked" ? 422 : 201).send(out);
+    });
+    app.post("/v1/channels/:id/claims", { preHandler: requireAgent }, async (req) =>
+      ch(req).claim(channelInputs.claim.parse({ ...body(req), channel_id: id(req) })),
+    );
+    app.post("/v1/channels/:id/releases", { preHandler: requireAgent }, async (req) =>
+      ch(req).release(channelInputs.release.parse({ ...body(req), channel_id: id(req) })),
+    );
+    app.post("/v1/channels/:id/agreements", { preHandler: requireAgent }, async (req) =>
+      ch(req).propose(channelInputs.propose.parse({ ...body(req), channel_id: id(req) })),
+    );
+    app.post(
+      "/v1/channels/:id/agreements/:version/accept",
+      { preHandler: requireAgent },
+      async (req) =>
+        ch(req).accept(
+          channelInputs.accept.parse({
+            ...body(req),
+            channel_id: id(req),
+            version: Number((req.params as { version: string }).version),
+          }),
+        ),
+    );
+    app.post("/v1/channels/:id/close", { preHandler: requireAgent }, async (req) =>
+      ch(req).close(channelInputs.close.parse({ ...body(req), channel_id: id(req) })),
+    );
+  }
   // Lets the bridge check a key at login. Ids and scopes only.
   app.get("/v1/whoami", { preHandler: requireAgent }, async (req) => ({
     agent_id: req.agent!.agentId,

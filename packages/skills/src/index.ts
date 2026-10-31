@@ -42,3 +42,13 @@ export {
   type EvalCase,
   type Grade,
 } from "./evals.ts";
+export {
+  canReview,
+  getSkill,
+  ReviewError,
+  reviewQueue,
+  reviewSkill,
+  searchSkills,
+  setCategoryOwner,
+  type SkillListItem,
+} from "./review.ts";

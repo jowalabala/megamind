@@ -1,6 +1,6 @@
 import { createDb, databaseSslFromEnv, databaseUrlFromEnv } from "@mm/db";
 import { createQueue } from "@mm/db/queue";
-import { fileBronze, s3Bronze } from "@mm/ingest";
+import { fileBronze, s3Bronze, tenantRedactors } from "@mm/ingest";
 import { buildApp } from "./app.ts";
 
 const connectionString = databaseUrlFromEnv();
@@ -25,6 +25,10 @@ const app = await buildApp({
   githubWebhookSecret: process.env.MM_GITHUB_WEBHOOK_SECRET || undefined,
   gatewaySecret: process.env.MM_GATEWAY_SECRET || undefined,
   gatewayUrl: process.env.MM_GATEWAY_URL || undefined,
+  webUrl: process.env.MM_WEB_URL || undefined,
+  redactorFor: process.env.MM_PSEUDONYM_SECRET
+    ? tenantRedactors({ db, pseudonymSecret: process.env.MM_PSEUDONYM_SECRET })
+    : undefined,
   logger: { level: process.env.LOG_LEVEL ?? "info" },
 });
 

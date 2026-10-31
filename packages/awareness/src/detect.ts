@@ -158,6 +158,8 @@ export interface Alert {
   resource: string;
   /** The other side, by the same visibility rules as presence. */
   with: string;
+  /** The other session, for channel_request. */
+  with_session_id: string;
   your_lines: [number, number][];
   their_lines: [number, number][];
   shared_lines: [number, number][];
@@ -180,13 +182,14 @@ export async function alertsFor(
     detail: Record<string, unknown>;
     first_seen_at: Date;
     mine_is_a: boolean;
+    other_id: string;
     display_name: string | null;
     visibility_pref: string;
     shares_team: boolean;
     team_name: string | null;
   }>(sql`
     SELECT o.id, o.kind, o.severity, o.resource, o.detail, o.first_seen_at,
-           (o.session_a = ${sessionId}) AS mine_is_a,
+           (o.session_a = ${sessionId}) AS mine_is_a, other.id AS other_id,
            m.display_name, m.visibility_pref,
            (EXISTS (SELECT 1 FROM team_members a JOIN team_members b ON a.team_id = b.team_id
                      WHERE a.member_id = m.id AND b.member_id = ${viewerMemberId})
@@ -225,6 +228,7 @@ export async function alertsFor(
       severity: r.severity,
       resource: r.resource,
       with: who,
+      with_session_id: r.other_id,
       your_lines: mine ?? [],
       their_lines: theirs ?? [],
       shared_lines: (r.detail.shared as [number, number][] | undefined) ?? [],

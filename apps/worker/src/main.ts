@@ -19,6 +19,7 @@ import {
 } from "@mm/github";
 import { bedrockTransport, createLlm, dbCallLogger, modelConfigFromEnv } from "@mm/llm";
 import { builtinPacks, categorizeTask, judgeSweep, type CategorizeJob } from "@mm/packs";
+import { expireChannels } from "@mm/collab";
 import { comprehendDetector } from "@mm/privacy/comprehend";
 
 const connectionString = databaseUrlFromEnv();
@@ -170,6 +171,12 @@ const timers = [
       if (githubDeps) await runSzzSweep(githubDeps, t.tenantId);
       await finalizeMetrics({ db, log }, t.tenantId);
       await judgeSweep({ db, packs, log }, t.tenantId);
+    }
+  }),
+  every("channels.expire", 60_000, async () => {
+    for (const t of await db.system.listTenantsForJobs()) {
+      const n = await db.withTenant(t.tenantId, (tx) => expireChannels(tx, t.tenantId));
+      if (n) log("channels.expired", { tenantId: t.tenantId, channels: n });
     }
   }),
   every("hot.prune", 60 * 60_000, async () => {

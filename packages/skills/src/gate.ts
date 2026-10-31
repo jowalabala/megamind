@@ -7,7 +7,7 @@
 //   3. Rubric: specificity, actionability, groundedness, generality, safety, 1-5 each.
 //   4. Dedupe: a near-identical existing skill gets a new version with merged evidence; a
 //      variant becomes a linked skill; anything else is a new skill. All in review.
-import { createRedactor } from "@mm/privacy";
+import { createRedactor, detectInjection } from "@mm/privacy";
 import {
   and,
   eq,
@@ -25,15 +25,6 @@ import { z } from "zod";
 
 // --- 1. Re-scan ------------------------------------------------------------------------------
 
-const INJECTION = [
-  /\b(ignore|disregard|forget)\b.{0,30}\b(previous|prior|above|earlier|all)\b.{0,20}\b(instructions?|rules|prompts?)\b/i,
-  /\byou are now\b/i,
-  /\b(system|developer) (prompt|message)\b/i,
-  /<\/?(untrusted_input|system|assistant|user)\b/i,
-  /\b(new|updated) instructions\b/i,
-  /\bdo not (tell|inform|alert) the (user|human|reviewer)\b/i,
-];
-
 export interface RescanResult {
   body: SkillDraftBody;
   title: string;
@@ -46,10 +37,7 @@ export function rescan(title: string, body: SkillDraftBody): RescanResult {
   let redactions = 0;
   const injection: string[] = [];
   const clean = (text: string) => {
-    for (const re of INJECTION) {
-      const m = re.exec(text);
-      if (m) injection.push(m[0]);
-    }
+    injection.push(...detectInjection(text));
     const r = redactor.redactSync(text);
     redactions += Object.values(r.counts).reduce((a, b) => a + b, 0);
     return r.text;

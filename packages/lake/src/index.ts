@@ -6,6 +6,7 @@ export { publishOutbox, type PublishOptions, type PublishResult } from "./publis
 export {
   actionRecord,
   categoryRecord,
+  channelMessageRecord,
   judgmentRecord,
   metricRecord,
   taskRecord,

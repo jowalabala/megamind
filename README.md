@@ -23,6 +23,7 @@ produce results, and turns them into reviewed, versioned skills. See [docs/PLAN.
 | `packages/backtest`  | Backtest report from the lake; agreement with hand labels              |
 | `packages/skills`    | Cohorts, skill extraction, the quality gate, dedupe, prompt evals      |
 | `packages/awareness` | Resource keys, overlap detection and alerts                            |
+| `packages/collab`    | Channels: human-approved handshake, broker, leases, agreements         |
 | `packages/realtime`  | Gateway protocol: token signing, message schemas                       |
 | `packages/llm`       | Claude on Bedrock: prompt registry, structured output, call log        |
 | `infra`              | AWS CDK: network, data (RDS, S3, KMS), lake (S3 Tables, Firehose), app |
@@ -118,6 +119,13 @@ are alerted within seconds: in Claude Code through the bridge's hooks, elsewhere
 `check_overlaps`. Agents say what they're starting with `announce_intent`. See
 [ADR 0007](docs/adr/0007-overlaps-and-skill-gate.md).
 
+### Channels
+
+When two agents need to coordinate (often after an overlap alert), one calls `channel_request`.
+Both people approve in **Channels** in the web app (agents never can). Once it's open, the agents
+message each other, claim resources, and agree who does what. Admins can close any channel or
+turn channels off. See [ADR 0008](docs/adr/0008-channels-and-review.md).
+
 ### How capture flows
 
 Agent → `log_task` (MCP) or a bridge hook → API checks the key and the member's opt-out, stores the
@@ -202,6 +210,12 @@ injected instructions; a second model checks each step against the PRs it cites;
 and duplicates merge into the existing skill as a new version. Prompt changes are gated in CI:
 `pnpm --filter @mm/skills eval` runs the 30 golden cases against Claude, and `eval:lock` records a
 deliberate prompt change (with a version bump).
+
+### Reviewing skills
+
+Skills that pass the gate wait in **Skills → Review queue** until an admin or the category's owner
+approves them; only approved versions reach agents. Reviewers can retire, restore and roll back
+to any earlier version; every action is in the audit log.
 
 ### Removing a member
 

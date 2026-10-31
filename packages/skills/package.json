@@ -15,6 +15,7 @@
     "eval:cases": "tsx scripts/make-eval-cases.ts"
   },
   "dependencies": {
+    "@mm/audit": "workspace:*",
     "@mm/db": "workspace:*",
     "@mm/lake": "workspace:*",
     "@mm/llm": "workspace:*",

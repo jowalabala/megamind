@@ -22,6 +22,7 @@ import {
   HEARTBEAT_MS,
   PROTOCOL,
   TOKEN_PROTOCOL_PREFIX,
+  type ChannelEvent,
   type OverlapAlert,
   type PresenceEntry,
 } from "@mm/realtime";
@@ -37,6 +38,7 @@ export const files = (sessionId: string) => ({
   stop: `${base(sessionId)}.stop`,
   injected: `${base(sessionId)}.injected`,
   alerts: `${base(sessionId)}.alerts.json`,
+  channel: `${base(sessionId)}.channel.json`,
   info: `${base(sessionId)}.json`,
 });
 
@@ -103,6 +105,7 @@ export async function runPresence(deps: PresenceDeps): Promise<void> {
             type: string;
             sessions?: PresenceEntry[];
             alerts?: OverlapAlert[];
+            events?: ChannelEvent[];
           };
           if (m.type === "presence") {
             writeFileSync(
@@ -110,6 +113,14 @@ export async function runPresence(deps: PresenceDeps): Promise<void> {
               JSON.stringify({ at: new Date().toISOString(), sessions: m.sessions }),
               { mode: 0o600 },
             );
+          } else if (m.type === "channel" && m.events?.length) {
+            let pending: ChannelEvent[] = [];
+            try {
+              pending = JSON.parse(readFileSync(f.channel, "utf8")) as ChannelEvent[];
+            } catch {
+              // none yet
+            }
+            writeFileSync(f.channel, JSON.stringify([...pending, ...m.events]), { mode: 0o600 });
           } else if (m.type === "alert" && m.alerts?.length) {
             // Queued for the next hook to tell the agent.
             const pending = readPendingAlerts(deps.sessionId);
@@ -163,8 +174,9 @@ export async function runPresence(deps: PresenceDeps): Promise<void> {
     }
   } finally {
     clearInterval(watcher);
-    for (const p of [f.pid, f.presence, f.stop, f.injected, f.alerts, f.info])
+    for (const p of [f.pid, f.presence, f.stop, f.injected, f.alerts, f.channel, f.info]) {
       rmSync(p, { force: true });
+    }
   }
 }
 
@@ -291,4 +303,18 @@ export function currentSession(
     }
   }
   return best ? { sessionId: best.sessionId, repo: best.repo, branch: best.branch } : null;
+}
+
+/** Channel news for the agent (once each), as context text; null when there is none. */
+export function takeChannelEvents(sessionId: string): string | null {
+  const f = files(sessionId).channel;
+  let events: ChannelEvent[] = [];
+  try {
+    events = JSON.parse(readFileSync(f, "utf8")) as ChannelEvent[];
+  } catch {
+    return null;
+  }
+  rmSync(f, { force: true });
+  if (events.length === 0) return null;
+  return ["Master Mind channel update:", ...events.map((e) => `- ${e.text}`)].join("\n");
 }

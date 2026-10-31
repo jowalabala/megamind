@@ -274,6 +274,7 @@ export const LAKE_TABLES = [
   "metric_observations",
   "task_categories",
   "judgments",
+  "channel_messages",
 ] as const;
 export type LakeTableName = (typeof LAKE_TABLES)[number];
 
@@ -508,6 +509,8 @@ export const skills = pgTable("skills", {
   variantOf: uuid("variant_of"),
   createdAt: createdAt(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  /** The version agents receive; null until one is approved. */
+  approvedVersion: integer("approved_version"),
 });
 
 export const skillVersions = pgTable(
@@ -522,9 +525,164 @@ export const skillVersions = pgTable(
     gate: jsonb("gate").$type<Record<string, unknown>>().notNull(),
     sourceDraftId: uuid("source_draft_id"),
     createdAt: createdAt(),
+    search: tsvector("search").generatedAlwaysAs(
+      sql`to_tsvector('simple', mm_search_text(title || ' ' || body::text))`,
+    ),
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.skillId, t.version] })],
 );
+
+// Channels and review (migration 0011) ----------------------------------------------------------
+
+export const SHARE_KINDS = ["intents", "summaries", "diffs_redacted", "messages"] as const;
+export type ShareKind = (typeof SHARE_KINDS)[number];
+
+export const collabSettings = pgTable("collab_settings", {
+  tenantId: uuid("tenant_id").primaryKey(),
+  enabled: boolean("enabled").notNull().default(true),
+  crossTeamAllowed: boolean("cross_team_allowed").notNull().default(false),
+  maxTtlMinutes: integer("max_ttl_minutes").notNull().default(480),
+  allowedShare: text("allowed_share")
+    .array()
+    .$type<ShareKind[]>()
+    .notNull()
+    .default(["intents", "summaries", "messages"]),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const collabPreapprovals = pgTable("collab_preapprovals", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id").notNull(),
+  memberId: uuid("member_id").notNull(),
+  sameTeamOnly: boolean("same_team_only").notNull().default(true),
+  repo: text("repo"),
+  share: text("share").array().$type<ShareKind[]>().notNull().default(["intents"]),
+  createdAt: createdAt(),
+});
+
+export const CHANNEL_STATUSES = ["requested", "open", "closed", "expired", "rejected"] as const;
+export type ChannelStatus = (typeof CHANNEL_STATUSES)[number];
+export interface ChannelScope {
+  resources: string[];
+  share: ShareKind[];
+  ttl_minutes: number;
+}
+
+export const channels = pgTable("channels", {
+  id: uuid("id").primaryKey(),
+  tenantId: uuid("tenant_id").notNull(),
+  purposeRedacted: text("purpose_redacted").notNull(),
+  scope: jsonb("scope").$type<ChannelScope>().notNull(),
+  status: text("status", { enum: CHANNEL_STATUSES }).notNull().default("requested"),
+  requestedBy: uuid("requested_by").notNull(),
+  lastSeq: bigint("last_seq", { mode: "number" }).notNull().default(0),
+  createdAt: createdAt(),
+  openedAt: timestamp("opened_at", { withTimezone: true }),
+  closesAt: timestamp("closes_at", { withTimezone: true }),
+  closedAt: timestamp("closed_at", { withTimezone: true }),
+  closeReason: text("close_reason"),
+});
+
+export const channelParticipants = pgTable(
+  "channel_participants",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    channelId: uuid("channel_id").notNull(),
+    sessionId: uuid("session_id").notNull(),
+    memberId: uuid("member_id").notNull(),
+    approval: text("approval", { enum: ["pending", "approved", "declined"] })
+      .notNull()
+      .default("pending"),
+    approvedVia: text("approved_via", { enum: ["web", "slack", "preapproval"] }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    deliveredSeq: bigint("delivered_seq", { mode: "number" }).notNull().default(0),
+    deliveredStatus: text("delivered_status"),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.channelId, t.sessionId] })],
+);
+
+export const CHANNEL_MESSAGE_TYPES = [
+  "intent_update",
+  "proposal",
+  "interface_change",
+  "question",
+  "answer",
+  "handoff",
+  "claim",
+  "release",
+  "note",
+] as const;
+export type ChannelMessageType = (typeof CHANNEL_MESSAGE_TYPES)[number];
+
+export const channelMessages = pgTable(
+  "channel_messages",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    channelId: uuid("channel_id").notNull(),
+    seq: bigint("seq", { mode: "number" }).notNull(),
+    id: uuid("id").notNull(),
+    fromSession: uuid("from_session").notNull(),
+    type: text("type", { enum: CHANNEL_MESSAGE_TYPES }).notNull(),
+    bodyRedacted: text("body_redacted").notNull(),
+    scan: jsonb("scan").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.channelId, t.seq] })],
+);
+
+export const leases = pgTable("leases", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id").notNull(),
+  resource: text("resource").notNull(),
+  holderSession: uuid("holder_session").notNull(),
+  channelId: uuid("channel_id").notNull(),
+  fencingToken: bigint("fencing_token", { mode: "number" })
+    .notNull()
+    .default(sql`nextval('lease_fencing_seq')`),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  releasedAt: timestamp("released_at", { withTimezone: true }),
+  createdAt: createdAt(),
+});
+
+export const agreements = pgTable(
+  "agreements",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    channelId: uuid("channel_id").notNull(),
+    version: integer("version").notNull(),
+    bodyRedacted: text("body_redacted").notNull(),
+    proposedBy: uuid("proposed_by").notNull(),
+    acceptedBy: uuid("accepted_by").array().notNull().default([]),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.channelId, t.version] })],
+);
+
+export const categoryOwners = pgTable(
+  "category_owners",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    memberId: uuid("member_id").notNull(),
+    pack: text("pack").notNull(),
+    category: text("category").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.memberId, t.pack, t.category] })],
+);
+
+export const REVIEW_ACTIONS = ["approve", "reject", "retire", "rollback", "restore"] as const;
+export type ReviewAction = (typeof REVIEW_ACTIONS)[number];
+
+export const skillReviews = pgTable("skill_reviews", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id").notNull(),
+  skillId: uuid("skill_id").notNull(),
+  version: integer("version").notNull(),
+  action: text("action", { enum: REVIEW_ACTIONS }).notNull(),
+  memberId: uuid("member_id"),
+  note: text("note"),
+  createdAt: createdAt(),
+});
 
 /** Every Drizzle table, used by the drift test. */
 export const allTables = {
@@ -554,4 +712,13 @@ export const allTables = {
   sessionOverlaps,
   skills,
   skillVersions,
+  collabSettings,
+  collabPreapprovals,
+  channels,
+  channelParticipants,
+  channelMessages,
+  leases,
+  agreements,
+  categoryOwners,
+  skillReviews,
 };

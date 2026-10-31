@@ -158,11 +158,14 @@ export class AppStack extends Stack {
         ...sharedEnv,
         // TODO(before pilot): wss:// once the HTTPS listener exists (same as the web app).
         MM_GATEWAY_URL: `ws://${web.loadBalancer.loadBalancerDnsName}`,
+        MM_WEB_URL: `http://${web.loadBalancer.loadBalancerDnsName}`,
       },
       secrets: {
         ...dbSecrets,
         MM_GITHUB_WEBHOOK_SECRET: ecs.Secret.fromSecretsManager(githubWebhook, "WEBHOOK_SECRET"),
         MM_GATEWAY_SECRET: ecs.Secret.fromSecretsManager(gatewaySecret),
+        // Channel text is redacted synchronously in the API (deterministic layers).
+        MM_PSEUDONYM_SECRET: ecs.Secret.fromSecretsManager(pseudonymSecret),
       },
       logging: ecs.LogDrivers.awsLogs({
         streamPrefix: "api",

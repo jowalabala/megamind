@@ -106,6 +106,19 @@ export const LAKE_TABLE_DEFS: Record<LakeTableName, LakeTableDef> = {
     ],
     partitions: byDay,
   },
+  channel_messages: {
+    name: "channel_messages",
+    columns: [
+      ...common,
+      { name: "channel_id", type: "string", required: true },
+      { name: "seq", type: "long", required: true },
+      { name: "session_id", type: "string", required: true },
+      { name: "type", type: "string", required: true },
+      { name: "body", type: "string", required: true },
+      ...times,
+    ],
+    partitions: byDay,
+  },
   metric_observations: {
     name: "metric_observations",
     columns: [

@@ -19,6 +19,7 @@ import {
 } from "./history.ts";
 
 export * from "./history.ts";
+export * from "./channels.ts";
 
 import { presenceEntry, type OverlapAlert, type PresenceEntry } from "@mm/realtime";
 import { announceIntentInput, type AnnounceIntentInput } from "@mm/ingest/schemas";
@@ -36,6 +37,7 @@ const overlapAlert = z.object({
   severity: z.enum(["high", "medium", "low"]),
   resource: z.string(),
   with: z.string(),
+  with_session_id: z.string(),
   your_lines: z.array(z.tuple([z.number(), z.number()])),
   their_lines: z.array(z.tuple([z.number(), z.number()])),
   shared_lines: z.array(z.tuple([z.number(), z.number()])),

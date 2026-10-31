@@ -38,6 +38,7 @@ export interface OverlapAlert {
   severity: "high" | "medium" | "low";
   resource: string;
   with: string;
+  with_session_id: string;
   your_lines: [number, number][];
   their_lines: [number, number][];
   shared_lines: [number, number][];
@@ -47,10 +48,23 @@ export interface OverlapAlert {
   text: string;
 }
 
+/** Something happened in a channel this session is part of. */
+export type ChannelEvent =
+  | {
+      kind: "status";
+      channel_id: string;
+      status: string;
+      purpose: string;
+      waiting_for_you: boolean;
+      text: string;
+    }
+  | { kind: "message"; channel_id: string; seq: number; type: string; body: string; text: string };
+
 export type ServerMessage =
   | { type: "welcome"; session_id: string }
   | { type: "presence"; sessions: PresenceEntry[] }
   | { type: "alert"; alerts: OverlapAlert[] }
+  | { type: "channel"; events: ChannelEvent[] }
   | { type: "error"; code: string; message: string };
 
 /** Close codes (4000-4999 are application-defined). */
