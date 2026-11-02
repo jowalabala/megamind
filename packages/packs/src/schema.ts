@@ -65,6 +65,11 @@ export const judgeSchema = z
   .object({
     /** Bump on any change: judgments are stored per version and never rewritten. */
     version: z.number().int().positive(),
+    /**
+     * In a pack with several rule sets (`judges`), the categories this one judges. Leave it
+     * out on one rule set to judge every category the others don't name.
+     */
+    categories: z.array(z.string().regex(CATEGORY_ID)).min(1).optional(),
     /** Metrics that must exist before a task is judged at all. */
     requires: z.array(z.string().regex(METRIC_ID)).min(1),
     skip_categories: z.array(z.string().regex(CATEGORY_ID)).default([]),
@@ -123,8 +128,58 @@ export const packSchema = z
       )
       .default([]),
     judge: judgeSchema.optional(),
+    /** Several rule sets, one per group of categories, when their metrics differ. */
+    judges: z.array(judgeSchema).min(1).max(20).optional(),
   })
   .superRefine((p, ctx) => {
+    if (p.judge && p.judges) {
+      ctx.addIssue({ code: "custom", message: "use judge or judges, not both", path: ["judges"] });
+    }
+    if (p.judge?.categories) {
+      ctx.addIssue({
+        code: "custom",
+        message: "categories belongs on rule sets inside judges",
+        path: ["judge", "categories"],
+      });
+    }
+    if (p.judges) {
+      if (new Set(p.judges.map((j) => j.version)).size > 1) {
+        ctx.addIssue({
+          code: "custom",
+          message: "every rule set in judges needs the same version",
+          path: ["judges"],
+        });
+      }
+      const seen = new Set<string>();
+      let catchAll = 0;
+      for (const j of p.judges) {
+        if (!j.categories) catchAll++;
+        for (const c of j.categories ?? []) {
+          if (seen.has(c)) {
+            ctx.addIssue({
+              code: "custom",
+              message: `category ${c} is in two rule sets`,
+              path: ["judges"],
+            });
+          }
+          seen.add(c);
+          if (!p.categories.some((x) => x.id === c)) {
+            ctx.addIssue({
+              code: "custom",
+              message: `judges: ${c} is not a category`,
+              path: ["judges"],
+            });
+          }
+        }
+      }
+      if (catchAll > 1) {
+        ctx.addIssue({
+          code: "custom",
+          message: "only one rule set may leave out categories",
+          path: ["judges"],
+        });
+      }
+    }
     const ids = p.categories.map((c) => c.id);
     if (new Set(ids).size !== ids.length) {
       ctx.addIssue({
@@ -142,3 +197,23 @@ export const packSchema = z
     }
   });
 export type Pack = z.infer<typeof packSchema>;
+
+/** A pack's rule sets: `judges`, or its single `judge`, or none. */
+export function packJudges(pack: Pack): JudgeConfig[] {
+  return pack.judges ?? (pack.judge ? [pack.judge] : []);
+}
+
+/** The ruleset version of a pack's judgments, or null when it judges nothing. */
+export function judgeVersion(pack: Pack): number | null {
+  return packJudges(pack)[0]?.version ?? null;
+}
+
+/** The rule set that judges a category: the one naming it, else the catch-all. */
+export function judgeFor(pack: Pack, category: string | null): JudgeConfig | null {
+  const all = packJudges(pack);
+  return (
+    (category ? all.find((j) => j.categories?.includes(category)) : undefined) ??
+    all.find((j) => !j.categories) ??
+    null
+  );
+}

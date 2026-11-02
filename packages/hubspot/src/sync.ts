@@ -35,6 +35,7 @@ import {
   type Sequence,
   type Tokens,
 } from "./client.ts";
+import { syncRevenue } from "./revenue.ts";
 
 export const SEQUENCE_OUTCOMES = {
   /** An enrollment counts once it is this old: time enough to reply or book. */
@@ -261,6 +262,15 @@ export async function syncHubspot(deps: HubspotDeps, tenantId: string): Promise<
             );
           }
         }
+      }
+      const revenue = await syncRevenue(deps, { tenantId, connectionId: conn.id }, client, owners);
+      stored += revenue.stored;
+      for (const taskId of revenue.created) {
+        await deps.enqueue(
+          "categorize.task",
+          { tenantId, taskId },
+          { id: idFromKey([taskId, "categorize", "hubspot"]) },
+        );
       }
       if (conn.backfillStatus !== "done") {
         await deps.db.withTenant(tenantId, async (tx) => {

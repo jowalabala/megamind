@@ -15,7 +15,8 @@
     "@mm/lake": "workspace:*",
     "@mm/llm": "workspace:*",
     "yaml": "^2.8.0",
-    "zod": "^4.1.0"
+    "zod": "^4.1.0",
+    "@mm/privacy": "workspace:*"
   },
   "devDependencies": {
     "@types/pg": "^8.15.0",

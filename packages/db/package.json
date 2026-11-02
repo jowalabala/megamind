@@ -20,7 +20,7 @@
     "dev:agent-key": "tsx src/cli/dev-agent-key.ts"
   },
   "dependencies": {
-    "drizzle-orm": "~0.44.7",
+    "drizzle-orm": "~0.45.2",
     "pg": "^8.16.0",
     "pg-boss": "^12.30.0"
   },

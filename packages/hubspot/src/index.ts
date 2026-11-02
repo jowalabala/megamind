@@ -5,15 +5,23 @@ export {
   hubspotClient,
   HubspotError,
   HubspotRateLimitedError,
+  DEAL_PROPERTIES,
+  listDeals,
+  listMarketingEmails,
   listOwners,
   listSequences,
+  MARKETING_EMAILS_PATH,
+  revokeRefreshToken,
   OUTCOME_PROPERTIES,
   refreshTokens,
   SEQUENCES_PATH,
   sequenceCounts,
   tokenInfo,
   type HubspotClient,
+  type Deal,
+  type EmailStats,
   type HubspotConfig,
+  type MarketingEmail,
   type Owner,
   type Sequence,
   type Tokens,
@@ -30,6 +38,19 @@ export {
   type HubspotDeps,
   type SequenceSyncResult,
 } from "./sync.ts";
+
+export {
+  DEAL_METRICS,
+  dealTaskId,
+  EMAIL_METRICS,
+  EMAIL_OUTCOMES,
+  emailTaskId,
+  syncRevenue,
+  upsertDeal,
+  upsertMarketingEmail,
+  type RevenueDeps,
+  type RevenueSyncResult,
+} from "./revenue.ts";
 
 /** HubSpot app settings from the environment, or null when HubSpot isn't configured. */
 export function hubspotConfigFromEnv(env: NodeJS.ProcessEnv = process.env) {

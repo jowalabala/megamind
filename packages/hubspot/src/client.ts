@@ -2,13 +2,16 @@
 //
 // Written from HubSpot's public API docs; see ADR 0009 for what has and hasn't been checked
 // against a live portal. The scopes are read-only, and contact reads ask for three date
-// properties only: no names, emails or other contact details are requested or kept.
+// properties only: no names, emails or other contact details are requested or kept. Marketing
+// emails come with aggregate counts only; deals with their stage and outcome, not amounts.
 
 export const HUBSPOT_SCOPES = [
   "oauth",
   "automation.sequences.read",
   "crm.objects.owners.read",
   "crm.objects.contacts.read",
+  "marketing.email.read",
+  "crm.objects.deals.read",
 ] as const;
 
 export interface HubspotConfig {
@@ -91,6 +94,20 @@ export const exchangeCode = (cfg: HubspotConfig, code: string) =>
 
 export const refreshTokens = (cfg: HubspotConfig, refreshToken: string) =>
   tokenCall(cfg, { grant_type: "refresh_token", refresh_token: refreshToken });
+
+/** Revokes a refresh token (on disconnect or tenant deletion). Already-revoked is fine. */
+export async function revokeRefreshToken(
+  cfg: { apiUrl?: string },
+  refreshToken: string,
+): Promise<void> {
+  const res = await fetch(
+    `${api(cfg)}/oauth/v1/refresh-tokens/${encodeURIComponent(refreshToken)}`,
+    { method: "DELETE", signal: AbortSignal.timeout(15_000) },
+  );
+  if (!res.ok && res.status !== 404 && res.status !== 400) {
+    throw new HubspotError(res.status, `HubSpot token revocation failed (${res.status})`);
+  }
+}
 
 /** Which portal a token belongs to, and who authorized it. */
 export async function tokenInfo(cfg: { apiUrl?: string }, accessToken: string) {
@@ -287,4 +304,158 @@ export async function sequenceCounts(
     if (after(p.engagements_last_meeting_booked ?? undefined, enrolled)) counts.meetings++;
   }
   return counts;
+}
+
+// --- Marketing emails -----------------------------------------------------------------------------
+
+export const MARKETING_EMAILS_PATH = "/marketing/v3/emails";
+
+export interface EmailStats {
+  sent: number;
+  delivered: number;
+  opened: number;
+  clicked: number;
+  unsubscribed: number;
+}
+
+export interface MarketingEmail {
+  id: string;
+  name: string;
+  /** Who published (else created) it: a HubSpot user id. */
+  userId: number | null;
+  publishedAt: Date;
+  type: string | null;
+  abTest: boolean;
+  stats: EmailStats;
+}
+
+interface RawEmail {
+  id: string | number;
+  name?: string;
+  state?: string;
+  type?: string;
+  isPublished?: boolean;
+  publishedAt?: string;
+  publishDate?: string;
+  publishedById?: string | number;
+  createdById?: string | number;
+  stats?: { counters?: Record<string, number> };
+}
+
+/**
+ * Counter names as HubSpot reports them. Only sent, delivered and open are confirmed by the
+ * docs; the others are checked against a live portal before the pilot (see ADR 0010).
+ */
+const COUNTER = {
+  sent: ["sent"],
+  delivered: ["delivered"],
+  opened: ["open"],
+  clicked: ["click"],
+  unsubscribed: ["unsubscribed"],
+} as const;
+
+function emailStats(counters: Record<string, number> = {}): EmailStats {
+  const pick = (names: readonly string[]) => {
+    for (const n of names) if (typeof counters[n] === "number") return counters[n]!;
+    return 0;
+  };
+  return {
+    sent: pick(COUNTER.sent),
+    delivered: pick(COUNTER.delivered),
+    opened: pick(COUNTER.opened),
+    clicked: pick(COUNTER.clicked),
+    unsubscribed: pick(COUNTER.unsubscribed),
+  };
+}
+
+/** Published marketing emails with their aggregate statistics. */
+export async function listMarketingEmails(
+  c: HubspotClient,
+  options: { publishedAfter?: Date } = {},
+): Promise<MarketingEmail[]> {
+  const out: MarketingEmail[] = [];
+  for await (const e of pages<RawEmail>((after) =>
+    c.get(MARKETING_EMAILS_PATH, {
+      includeStats: "true",
+      isPublished: "true",
+      limit: 100,
+      after,
+      publishedAfter: options.publishedAfter?.toISOString(),
+    }),
+  )) {
+    const published = e.publishedAt ?? e.publishDate;
+    if (!published || e.isPublished === false) continue;
+    const by = e.publishedById ?? e.createdById;
+    out.push({
+      id: String(e.id),
+      name: e.name ?? "(unnamed email)",
+      userId: by === undefined || by === null || by === "" ? null : Number(by),
+      publishedAt: new Date(published),
+      type: e.type ?? null,
+      abTest: /AB_/i.test(e.type ?? ""),
+      stats: emailStats(e.stats?.counters),
+    });
+  }
+  return out;
+}
+
+// --- Deals ----------------------------------------------------------------------------------------
+
+/** Stage and outcome only: no amount, company or contact properties are requested. */
+export const DEAL_PROPERTIES = [
+  "dealname",
+  "dealstage",
+  "pipeline",
+  "dealtype",
+  "createdate",
+  "closedate",
+  "hs_is_closed",
+  "hs_is_closed_won",
+  "hubspot_owner_id",
+] as const;
+
+export interface Deal {
+  id: string;
+  name: string;
+  ownerId: string | null;
+  pipeline: string | null;
+  stage: string | null;
+  dealType: string | null;
+  createdAt: Date;
+  closedAt: Date | null;
+  isClosed: boolean;
+  isWon: boolean;
+}
+
+const truthy = (v: string | null | undefined) => v === "true" || v === "1";
+
+export async function listDeals(c: HubspotClient): Promise<Deal[]> {
+  const out: Deal[] = [];
+  for await (const d of pages<{ id: string; properties?: Record<string, string | null> }>(
+    (after) =>
+      c.get("/crm/v3/objects/deals", {
+        properties: DEAL_PROPERTIES.join(","),
+        limit: 100,
+        after,
+        archived: "false",
+      }),
+    200,
+  )) {
+    const p = d.properties ?? {};
+    if (!p.createdate) continue;
+    const isClosed = truthy(p.hs_is_closed);
+    out.push({
+      id: String(d.id),
+      name: p.dealname ?? "(unnamed deal)",
+      ownerId: p.hubspot_owner_id ?? null,
+      pipeline: p.pipeline ?? null,
+      stage: p.dealstage ?? null,
+      dealType: p.dealtype ?? null,
+      createdAt: new Date(p.createdate),
+      closedAt: isClosed && p.closedate ? new Date(p.closedate) : null,
+      isClosed,
+      isWon: truthy(p.hs_is_closed_won),
+    });
+  }
+  return out;
 }

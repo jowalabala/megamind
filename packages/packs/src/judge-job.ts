@@ -7,11 +7,12 @@
 import { idFromKey, judgments, sql, tasks, eq, type MasterMindDb, type TenantTx } from "@mm/db";
 import { enqueueLakeRecords, judgmentRecord } from "@mm/lake";
 import { computeStats, inputHash, judge, type Baseline } from "./judge.ts";
-import type { JudgeConfig, Pack } from "./schema.ts";
+import { judgeFor, judgeVersion, packJudges, type JudgeConfig, type Pack } from "./schema.ts";
+import { resolvePacks, type PackSource } from "./tenant.ts";
 
 export interface JudgeDeps {
   db: MasterMindDb;
-  packs: Pack[];
+  packs: PackSource;
   log?: (event: string, fields: Record<string, unknown>) => void;
 }
 
@@ -71,11 +72,11 @@ async function baselineFor(
 
 function evaluateCandidate(
   pack: Pack,
+  config: JudgeConfig,
   t: Candidate,
   metrics: Record<string, number>,
   baseline: Baseline,
 ) {
-  const config = pack.judge!;
   const result = judge(config, { category: t.category, metrics }, baseline);
   if (!result) return null;
   const hash = inputHash({
@@ -91,81 +92,107 @@ function evaluateCandidate(
 /** Judges up to `limit` tasks per pack. Returns how many judgments were written. */
 export async function judgeSweep(deps: JudgeDeps, tenantId: string, limit = 200): Promise<number> {
   let written = 0;
-  for (const pack of deps.packs.filter((p) => p.judge)) {
-    const config = pack.judge!;
-    written += await deps.db.withTenant(tenantId, async (tx) => {
-      const due = await tx.execute<Candidate>(sql`
+  const { current } = await resolvePacks(deps.packs, tenantId);
+  for (const pack of current) {
+    for (const config of packJudges(pack)) {
+      written += await sweepRuleSet(deps, tenantId, pack, config, limit);
+    }
+  }
+  if (written) deps.log?.("judge.written", { tenantId, judgments: written });
+  return written;
+}
+
+const sqlList = (xs: string[]) =>
+  sql.join(
+    xs.map((x) => sql`${x}`),
+    sql`, `,
+  );
+
+/** Which tasks a rule set judges: its own categories, or (catch-all) the ones no other names. */
+function categoryFilter(pack: Pack, config: JudgeConfig) {
+  if (config.categories) return sql`AND t.category IN (${sqlList(config.categories)})`;
+  const claimed = packJudges(pack).flatMap((j) => j.categories ?? []);
+  const excluded = [...claimed, ...config.skip_categories];
+  return excluded.length
+    ? sql`AND (t.category IS NULL OR t.category NOT IN (${sqlList(excluded)}))`
+    : sql``;
+}
+
+async function sweepRuleSet(
+  deps: JudgeDeps,
+  tenantId: string,
+  pack: Pack,
+  config: JudgeConfig,
+  limit: number,
+): Promise<number> {
+  return deps.db.withTenant(tenantId, async (tx) => {
+    const due = await tx.execute<Candidate>(sql`
         SELECT t.id, t.category, t.completed_at, t.member_id, t.actor_key, t.agent_identity_id, t.source
           FROM tasks t
          WHERE t.pack = ${pack.id} AND t.completed_at IS NOT NULL
+           ${categoryFilter(pack, config)}
            AND NOT EXISTS (SELECT 1 FROM judgments j WHERE j.task_id = t.id
                              AND j.pack = ${pack.id} AND j.ruleset_version = ${config.version})
            AND (SELECT count(DISTINCT m.metric_key) FROM metric_observations m
                  WHERE m.task_id = t.id
-                   AND m.metric_key IN (${sql.join(
-                     config.requires.map((r) => sql`${r}`),
-                     sql`, `,
-                   )}))
+                   AND m.metric_key IN (${sqlList(config.requires)}))
                = ${config.requires.length}
          ORDER BY t.completed_at, t.id
          LIMIT ${limit}`);
-      let n = 0;
-      for (const t of due.rows) {
-        const metrics = await latestMetrics(tx, t.id);
-        const baseline = await baselineFor(tx, pack.id, config, t);
-        const result = evaluateCandidate(pack, t, metrics, baseline);
-        if (!result) continue; // skipped category
-        const id = idFromKey([t.id, "judgment", pack.id, String(config.version)]);
-        // Event time is when the outcome became knowable, not wall-clock time: replays match.
-        const judgedAt = new Date(t.completed_at);
-        const inserted = await tx
-          .insert(judgments)
-          .values({
-            id,
-            tenantId,
-            taskId: t.id,
-            pack: pack.id,
-            rulesetVersion: config.version,
-            category: t.category,
-            verdict: result.verdict,
-            reasons: result.reasons,
-            baseline: baseline as unknown as Record<string, Record<string, number>>,
-            inputHash: result.hash,
-          })
-          .onConflictDoNothing()
-          .returning({ id: judgments.id });
-        if (!inserted.length) continue;
-        await tx
-          .update(tasks)
-          .set({ state: "judged", updatedAt: new Date() })
-          .where(eq(tasks.id, t.id));
-        await enqueueLakeRecords(tx, tenantId, [
-          judgmentRecord({
-            id: idFromKey([id, result.hash]),
-            tenantId,
-            memberId: t.member_id,
-            actorKey: t.actor_key,
-            agentId: t.agent_identity_id,
-            source: t.source as "github",
-            taskId: t.id,
-            pack: pack.id,
-            rulesetVersion: config.version,
-            category: t.category,
-            verdict: result.verdict,
-            reasons: result.reasons,
-            baseline,
-            inputHash: result.hash,
-            judgedAt,
-            ingestedAt: new Date(),
-          }),
-        ]);
-        n++;
-      }
-      return n;
-    });
-  }
-  if (written) deps.log?.("judge.written", { tenantId, judgments: written });
-  return written;
+    let n = 0;
+    for (const t of due.rows) {
+      const metrics = await latestMetrics(tx, t.id);
+      const baseline = await baselineFor(tx, pack.id, config, t);
+      const result = evaluateCandidate(pack, config, t, metrics, baseline);
+      if (!result) continue; // skipped category
+      const id = idFromKey([t.id, "judgment", pack.id, String(config.version)]);
+      // Event time is when the outcome became knowable, not wall-clock time: replays match.
+      const judgedAt = new Date(t.completed_at);
+      const inserted = await tx
+        .insert(judgments)
+        .values({
+          id,
+          tenantId,
+          taskId: t.id,
+          pack: pack.id,
+          rulesetVersion: config.version,
+          category: t.category,
+          verdict: result.verdict,
+          reasons: result.reasons,
+          baseline: baseline as unknown as Record<string, Record<string, number>>,
+          inputHash: result.hash,
+        })
+        .onConflictDoNothing()
+        .returning({ id: judgments.id });
+      if (!inserted.length) continue;
+      await tx
+        .update(tasks)
+        .set({ state: "judged", updatedAt: new Date() })
+        .where(eq(tasks.id, t.id));
+      await enqueueLakeRecords(tx, tenantId, [
+        judgmentRecord({
+          id: idFromKey([id, result.hash]),
+          tenantId,
+          memberId: t.member_id,
+          actorKey: t.actor_key,
+          agentId: t.agent_identity_id,
+          source: t.source as "github",
+          taskId: t.id,
+          pack: pack.id,
+          rulesetVersion: config.version,
+          category: t.category,
+          verdict: result.verdict,
+          reasons: result.reasons,
+          baseline,
+          inputHash: result.hash,
+          judgedAt,
+          ingestedAt: new Date(),
+        }),
+      ]);
+      n++;
+    }
+    return n;
+  });
 }
 
 export interface ReplayMismatch {
@@ -179,6 +206,7 @@ export async function replayJudgments(
   deps: Pick<JudgeDeps, "db" | "packs">,
   tenantId: string,
 ): Promise<{ checked: number; mismatches: ReplayMismatch[] }> {
+  const { all } = await resolvePacks(deps.packs, tenantId);
   return deps.db.withTenant(tenantId, async (tx) => {
     const stored = await tx
       .select({
@@ -192,7 +220,7 @@ export async function replayJudgments(
     const mismatches: ReplayMismatch[] = [];
     let checked = 0;
     for (const j of stored) {
-      const pack = deps.packs.find((p) => p.id === j.pack && p.judge?.version === j.version);
+      const pack = all.find((p) => p.id === j.pack && judgeVersion(p) === j.version);
       if (!pack) continue; // judged by a ruleset version no longer loaded
       const [t] = await tx
         .execute<Candidate>(
@@ -202,14 +230,17 @@ export async function replayJudgments(
         )
         .then((r) => r.rows);
       checked++;
-      const result = t
-        ? evaluateCandidate(
-            pack,
-            t,
-            await latestMetrics(tx, t.id),
-            await baselineFor(tx, pack.id, pack.judge!, t),
-          )
-        : null;
+      const config = t ? judgeFor(pack, t.category) : null;
+      const result =
+        t && config
+          ? evaluateCandidate(
+              pack,
+              config,
+              t,
+              await latestMetrics(tx, t.id),
+              await baselineFor(tx, pack.id, config, t),
+            )
+          : null;
       if (!result || result.verdict !== j.verdict || result.hash !== j.inputHash) {
         mismatches.push({
           taskId: j.taskId,

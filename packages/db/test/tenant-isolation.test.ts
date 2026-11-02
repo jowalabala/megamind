@@ -6,6 +6,9 @@ import { createDb, sql, TenantContextError, type MasterMindDb } from "../src/ind
 import { createAgent, revokeAgent } from "../src/repos/agents.ts";
 import { addMemberToTeam, ensureMember } from "../src/repos/members.ts";
 import { agentKeys, tasks, teamMembers, teams } from "../src/schema.ts";
+import { purgeTenantRows, readTenantDeletion, tenantRowCounts } from "../src/admin.ts";
+import * as dashboardRepo from "../src/repos/dashboard.ts";
+import * as tenantDeletionRepo from "../src/repos/tenant-deletion.ts";
 import { adminQuery, startTestDatabase, type TestDatabase } from "../src/testing.ts";
 
 /** Tables that intentionally hold no tenant data. Each needs a reason, and mm_app must have no access. */
@@ -187,6 +190,18 @@ async function seedTenant(slug: string) {
     await tx.execute(sql`
       INSERT INTO notifications (tenant_id, member_id, kind)
       VALUES (${t.tenantId}, ${member.id}, 'skill_review')`);
+    await tx.execute(sql`
+      INSERT INTO tenant_packs (tenant_id, pack_id, version, yaml, created_by_member_id)
+      VALUES (${t.tenantId}, 'generic', 1, 'id: generic', ${t.adminMemberId})`);
+    await tx.execute(sql`
+      INSERT INTO outcome_imports (tenant_id, member_id, rows, stored)
+      VALUES (${t.tenantId}, ${t.adminMemberId}, 1, 1)`);
+    await tx.execute(sql`
+      INSERT INTO hubspot_marketing_emails (tenant_id, task_id, connection_id, email_id, published_at)
+      VALUES (${t.tenantId}, ${prTask}, ${conn!.id}, '1', now())`);
+    await tx.execute(sql`
+      INSERT INTO hubspot_deals (tenant_id, task_id, connection_id, deal_id, created_at_hs)
+      VALUES (${t.tenantId}, ${prTask}, ${conn!.id}, '1', now())`);
     return {
       tenantId: t.tenantId,
       teamId: team!.id,
@@ -204,6 +219,16 @@ beforeAll(async () => {
   db = createDb({ connectionString: env.appUrl, max: 1 });
   A = await seedTenant("alpha");
   B = await seedTenant("bravo");
+  // The app can only read deletion records (scheduling goes through a function that also
+  // suspends the tenant), so the seed writes a cancelled one directly.
+  for (const t of [A, B]) {
+    await adminQuery(
+      env.adminUrl,
+      `INSERT INTO tenant_deletions (tenant_id, requested_by_member_id, purge_after, status)
+       VALUES ($1, gen_random_uuid(), now(), 'cancelled')`,
+      [t.tenantId],
+    );
+  }
   const { rows } = await adminQuery<{ relname: string }>(
     env.adminUrl,
     `SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -483,5 +508,95 @@ describe("tenant context handling", () => {
     ).rejects.toThrow("boom");
     const { rows } = await adminQuery(env.adminUrl, "SELECT 1 FROM teams WHERE name = 'Doomed'");
     expect(rows).toHaveLength(0);
+  });
+});
+
+describe("tenant deletion", () => {
+  // Runs last: it suspends and then purges tenant B.
+  it("only an admin can schedule it; scheduling suspends the tenant", async () => {
+    const memberOnly = db.withTenant(B.tenantId, (tx) =>
+      tenantDeletionRepo.scheduleDeletion(tx, {
+        requestedByMemberId: B.memberId,
+        purgeAfter: new Date(Date.now() + 8 * 86_400_000),
+      }),
+    );
+    await expect(memberOnly).rejects.toMatchObject({
+      cause: expect.objectContaining({ code: "42501" }),
+    });
+    const admin = await adminQuery<{ id: string }>(
+      env.adminUrl,
+      "SELECT id FROM members WHERE tenant_id = $1 AND role = 'admin'",
+      [B.tenantId],
+    );
+    const tooSoon = db.withTenant(B.tenantId, (tx) =>
+      tenantDeletionRepo.scheduleDeletion(tx, {
+        requestedByMemberId: admin.rows[0]!.id,
+        purgeAfter: new Date(Date.now() + 3_600_000),
+      }),
+    );
+    await expect(tooSoon).rejects.toThrow();
+    const scheduled = await db.withTenant(B.tenantId, (tx) =>
+      tenantDeletionRepo.scheduleDeletion(tx, {
+        requestedByMemberId: admin.rows[0]!.id,
+        purgeAfter: new Date(Date.now() + 8 * 86_400_000),
+      }),
+    );
+    expect(scheduled.status).toBe("scheduled");
+    // Suspended: B's agent key stops working, its connections stop resolving, jobs skip it.
+    expect(await db.system.authenticateAgent(B.agentKey)).toBeNull();
+    expect(await db.system.resolveConnection("github", "inst-bravo")).toBeNull();
+    expect((await db.system.listTenantsForJobs()).map((t) => t.tenantId)).not.toContain(B.tenantId);
+    // A is unaffected.
+    expect(await db.system.authenticateAgent(A.agentKey)).not.toBeNull();
+  });
+
+  it("the app role can't purge, even inside the tenant", async () => {
+    await expect(
+      db.withTenant(B.tenantId, (tx) => tx.execute(sql`SELECT mm_purge_tenant(${B.tenantId})`)),
+    ).rejects.toMatchObject({ cause: expect.objectContaining({ code: "42501" }) });
+    await expect(
+      db.withTenant(B.tenantId, (tx) =>
+        tx
+          .execute(sql`SELECT set_config('mm.purge_tenant', ${B.tenantId}, true)`)
+          .then(() => tx.execute(sql`DELETE FROM audit_events`)),
+      ),
+    ).rejects.toMatchObject({ cause: expect.objectContaining({ code: "42501" }) });
+  });
+
+  it("the purge leaves no row of B in any table, and A untouched", async () => {
+    const aBefore = await tenantRowCounts(env.adminUrl, A.tenantId);
+    const deleted = await purgeTenantRows(env.adminUrl, B.tenantId);
+    expect(deleted.audit_events).toBeGreaterThan(0);
+    const bAfter = await tenantRowCounts(env.adminUrl, B.tenantId);
+    // Every table with a tenant key was checked, including ones added after this test.
+    expect(Object.keys(bAfter).length).toBeGreaterThanOrEqual(tenantTables.length - 1);
+    for (const [table, n] of Object.entries(bAfter)) expect.soft(n, table).toBe(0);
+    expect(await tenantRowCounts(env.adminUrl, A.tenantId)).toEqual(aBefore);
+    const state = await readTenantDeletion(env.adminUrl, B.tenantId);
+    expect(state).toMatchObject({ status: "purging", workosOrgId: null });
+    expect(state!.steps.postgres).toBeTruthy();
+    // A second purge has nothing to do but doesn't fail.
+    expect(await purgeTenantRows(env.adminUrl, B.tenantId)).not.toHaveProperty("members");
+  });
+
+  it("the audit log stays append-only for the owner outside a purge", async () => {
+    await expect(
+      adminQuery(env.adminUrl, "DELETE FROM audit_events WHERE tenant_id = $1", [A.tenantId]),
+    ).rejects.toThrow(/append-only/);
+  });
+});
+
+describe("dashboard queries", () => {
+  it("run inside a tenant and count only that tenant's data", async () => {
+    const stats = await db.withTenant(A.tenantId, (tx) => dashboardRepo.pilotStats(tx));
+    expect(stats.tasksBySource.mcp).toBeGreaterThan(0);
+    // One person's results never produce a rate.
+    for (const p of stats.outcomes) expect(p.successRate).toBeNull();
+    const steps = await db.withTenant(A.tenantId, (tx) =>
+      dashboardRepo.onboardingSteps(tx, A.tenantId),
+    );
+    expect(steps.find((s) => s.id === "invite")?.done).toBe(true);
+    expect(steps.find((s) => s.id === "github")?.done).toBe(true);
+    expect(steps.find((s) => s.id === "lake")?.done).toBe(false);
   });
 });

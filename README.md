@@ -19,18 +19,21 @@ produce results, and turns them into reviewed, versioned skills. See [docs/PLAN.
 | `packages/mcp`       | MCP tool definitions shared by the remote server and the bridge        |
 | `packages/lake`      | Iceberg lake: outbox publisher, Athena queries, erasure, provisioning  |
 | `packages/github`    | GitHub App connector: auth, backfill, webhooks, PR sync and features   |
-| `packages/hubspot`   | HubSpot connector: OAuth, sequences, reply and meeting counts          |
+| `packages/hubspot`   | HubSpot connector: sequences, marketing emails, deals (counts only)    |
 | `packages/slack`     | Slack: notification DMs, channel approval buttons, request signatures  |
 | `packages/vault`     | Seals OAuth tokens (KMS in AWS, AES-GCM locally)                       |
-| `packages/packs`     | Domain packs (YAML): categories, rules, features, metrics; categorizer |
-| `packages/backtest`  | Backtest report from the lake; agreement with hand labels              |
+| `packages/packs`     | Domain packs (YAML), admin-edited packs, CSV outcomes, categorizer     |
+| `packages/backtest`  | Pilot backtest: outcomes, skill lift with placebo, overlap replay      |
 | `packages/skills`    | Cohorts, skill extraction, the quality gate, dedupe, prompt evals      |
 | `packages/awareness` | Resource keys, overlap detection and alerts                            |
 | `packages/collab`    | Channels: human-approved handshake, broker, leases, agreements         |
 | `packages/realtime`  | Gateway protocol: token signing, message schemas                       |
 | `packages/llm`       | Claude on Bedrock: prompt registry, structured output, call log        |
-| `infra`              | AWS CDK: network, data (RDS, S3, KMS), lake (S3 Tables, Firehose), app |
+| `packages/ops`       | Operator jobs: tenant purge, restore drill                             |
+| `infra`              | AWS CDK: network, data, lake, security (CloudTrail, GuardDuty), app    |
 | `docs/adr`           | Architecture decisions                                                 |
+| `docs/security`      | Threat model and security policies                                     |
+| `docs/runbook.md`    | Deploying, onboarding a pilot, purges, restore drills, incidents       |
 
 ## Local setup
 
@@ -239,17 +242,54 @@ redirect URL `<web>/integrations/slack/callback`, and interactivity pointing at
 
 ### HubSpot
 
-Create a HubSpot app with scopes `oauth`, `automation.sequences.read`, `crm.objects.owners.read`
-and `crm.objects.contacts.read`, and redirect URL `<web>/integrations/hubspot/callback`. Set
-`MM_HUBSPOT_CLIENT_ID`, `MM_HUBSPOT_CLIENT_SECRET` and `MM_HUBSPOT_REDIRECT_URI` (web and worker),
-then connect it from **Settings → Integrations**. The worker imports sequences every 30 minutes
-and records reply and meeting rates once a sequence is 30 days old (counts only, no contact data).
+Create a HubSpot app with scopes `oauth`, `automation.sequences.read`, `crm.objects.owners.read`,
+`crm.objects.contacts.read`, `marketing.email.read` and `crm.objects.deals.read`, and redirect URL
+`<web>/integrations/hubspot/callback`. Set `MM_HUBSPOT_CLIENT_ID`, `MM_HUBSPOT_CLIENT_SECRET` and
+`MM_HUBSPOT_REDIRECT_URI` (web and worker), then connect it from **Settings → Integrations**
+(portals connected before week 10 reconnect once for the two new scopes). Every 30 minutes the
+worker imports sequences, published marketing emails and deals. Results are recorded once they're
+final: reply and meeting rates when a sequence is 30 days old, click and unsubscribe rates a week
+after an email is sent, won or lost when a deal closes. Counts and stages only: no contact data,
+message contents or deal amounts. See [ADR 0010](docs/adr/0010-packs-revenue-offboarding-hardening.md).
+
+### Metrics for other teams (the generic pack)
+
+Work that GitHub and HubSpot don't cover is judged by the generic pack, which admins edit under
+**Settings → Metrics**: categories, metrics, and what counts as success or failure. Every change
+is a new version; earlier work keeps the rules it was judged by. Results come from agents
+(`report_outcome`) or a CSV upload on the same page (`ref,metric,value`, plus optional `n`,
+`observed_at`, `title`, `owner_email`, `completed_at`, `category`; refs look like
+`jira:issue:FIN-12`).
 
 ### Removing a member
 
 Settings → Members → Remove (admins). It removes them from the WorkOS organization, deletes their
 Postgres data at once, and the worker deletes their raw payloads and lake rows (twice, 15 minutes
 apart, to catch rows still in flight). Old Iceberg snapshots expire within 11 days.
+
+### Deleting an organization
+
+An admin schedules it under **Settings → Organization**. The workspace is suspended at once
+(agent keys, webhooks and jobs stop), any admin can cancel for 7 days, and then an operator runs
+the purge, which removes everything, including the lake, whose key is destroyed. See
+[the runbook](docs/runbook.md#tenant-purge).
+
+### Pilot dashboard and backtest
+
+Admins see a setup checklist on the dashboard until the pilot is set up; everyone sees team-level
+numbers (work captured, outcomes, skills, overlaps), never per person. The backtest report for the
+pilot:
+
+```bash
+DATABASE_URL=... pnpm --filter @mm/backtest backtest <tenant-id> --train-end 2026-07-01 --skills --overlaps --out backtest.md
+```
+
+## Security
+
+[Threat model](docs/security/threat-model.md), [policies](docs/security/policies.md) and the
+[runbook](docs/runbook.md). CI runs secret scanning (gitleaks), CodeQL, a dependency audit and
+image scans (`.github/workflows/security.yml`). Draft DPA and member privacy notice for the pilot:
+`docs/legal/` (for legal review).
 
 ## Checks
 

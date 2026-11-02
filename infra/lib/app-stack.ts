@@ -17,7 +17,7 @@ import * as iam from "aws-cdk-lib/aws-iam";
 import * as kms from "aws-cdk-lib/aws-kms";
 import * as logs from "aws-cdk-lib/aws-logs";
 import type * as rds from "aws-cdk-lib/aws-rds";
-import type * as s3 from "aws-cdk-lib/aws-s3";
+import * as s3 from "aws-cdk-lib/aws-s3";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import type { Construct } from "constructs";
 import type { StageConfig } from "./config.ts";
@@ -36,7 +36,10 @@ export interface AppStackProps extends StackProps {
     tableBucketArn: string;
     /** Per-tenant query roles live under this path (created by the provisioning CLI). */
     tenantRolePathArn: string;
+    resultsBucketName: string;
   };
+  /** Object-locked bucket for restore drill reports and other audit evidence. */
+  evidenceBucket: s3.IBucket;
 }
 
 /** Bronze object keys all start with this prefix (see packages/ingest/src/bronze.ts). */
@@ -96,6 +99,13 @@ export class AppStack extends Stack {
       removalPolicy: RemovalPolicy.RETAIN,
     });
 
+    // Keys per-tenant pseudonyms (packages/ingest/src/redaction.ts). Generated, never typed.
+    const pseudonymSecret = new secretsmanager.Secret(this, "PseudonymSecret", {
+      secretName: `mastermind/${cfg.stage}/pseudonym`,
+      description: "Secret for per-tenant pseudonym keys",
+      generateSecretString: { excludePunctuation: true, passwordLength: 64 },
+    });
+
     const web = new ecsPatterns.ApplicationLoadBalancedFargateService(this, "Web", {
       cluster,
       desiredCount: cfg.webDesiredCount,
@@ -140,6 +150,8 @@ export class AppStack extends Stack {
           MM_HUBSPOT_CLIENT_SECRET: ecs.Secret.fromSecretsManager(hubspotApp, "CLIENT_SECRET"),
           MM_SLACK_CLIENT_ID: ecs.Secret.fromSecretsManager(slackApp, "CLIENT_ID"),
           MM_SLACK_CLIENT_SECRET: ecs.Secret.fromSecretsManager(slackApp, "CLIENT_SECRET"),
+          // CSV outcome uploads are redacted in the web app, like everything else at ingest.
+          MM_PSEUDONYM_SECRET: ecs.Secret.fromSecretsManager(pseudonymSecret),
         },
       },
     });
@@ -162,13 +174,6 @@ export class AppStack extends Stack {
     });
 
     // API and worker: one image, two entrypoints. -------------------------------------
-
-    // Keys per-tenant pseudonyms (packages/ingest/src/redaction.ts). Generated, never typed.
-    const pseudonymSecret = new secretsmanager.Secret(this, "PseudonymSecret", {
-      secretName: `mastermind/${cfg.stage}/pseudonym`,
-      description: "Secret for per-tenant pseudonym keys",
-      generateSecretString: { excludePunctuation: true, passwordLength: 64 },
-    });
 
     // Signs the 5-minute tokens the API gives agents for the real-time gateway.
     const gatewaySecret = new secretsmanager.Secret(this, "GatewaySecret", {
@@ -349,18 +354,153 @@ export class AppStack extends Stack {
       minHealthyPercent: 100,
     });
 
+    // Ops: one-off operator tasks (tenant purge, restore drill), run with `aws ecs run-task`
+    // (docs/runbook.md). Never a service. Its role holds only what those two jobs need.
+    const opsTask = new ecs.FargateTaskDefinition(this, "OpsTask", {
+      cpu: 512,
+      memoryLimitMiB: 1024,
+    });
+    const dbOwnerSecret = props.db.secret!;
+    opsTask.addContainer("ops", {
+      image: servicesImage,
+      // Overridden per run: ops/purge-tenant.js <tenant-id> or ops/restore-drill.js.
+      command: ["node", "--enable-source-maps", "ops/restore-drill.js"],
+      environment: {
+        NODE_ENV: "production",
+        AWS_REGION: this.region,
+        MM_STAGE: cfg.stage,
+        MM_DB_INSTANCE_ID: props.db.instanceIdentifier,
+        MM_DB_HOST: props.db.dbInstanceEndpointAddress,
+        MM_DB_OWNER_SECRET_ARN: dbOwnerSecret.secretArn,
+        MM_BRONZE_BUCKET: props.bronzeBucket.bucketName,
+        MM_LAKE_TABLE_BUCKET_ARN: props.lake.tableBucketArn,
+        MM_LAKE_RESULTS_BUCKET: props.lake.resultsBucketName,
+        MM_VAULT_KMS_KEY_ID: tokenKey.keyArn,
+        MM_DRILL_REPORT_BUCKET: props.evidenceBucket.bucketName,
+      },
+      secrets: {
+        WORKOS_API_KEY: ecs.Secret.fromSecretsManager(workosSecret, "WORKOS_API_KEY"),
+      },
+      logging: ecs.LogDrivers.awsLogs({
+        streamPrefix: "ops",
+        logRetention: logs.RetentionDays.ONE_YEAR,
+      }),
+    });
+    const ops = opsTask.taskRole;
+    // Read the owner secret. Granted on the role only: a grant on the data stack's key policy
+    // would make that stack depend on this one.
+    ops.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"],
+        resources: [dbOwnerSecret.secretArn],
+      }),
+    );
+    if (dbOwnerSecret.encryptionKey) {
+      ops.addToPrincipalPolicy(
+        new iam.PolicyStatement({
+          actions: ["kms:Decrypt"],
+          resources: [dbOwnerSecret.encryptionKey.keyArn],
+          conditions: {
+            StringEquals: { "kms:ViaService": `secretsmanager.${this.region}.amazonaws.com` },
+          },
+        }),
+      );
+    }
+    // Purge: open sealed tokens to revoke them; delete raw payloads, lake and query results.
+    tokenKey.grantDecrypt(ops);
+    props.bronzeBucket.grantRead(ops, BRONZE_PREFIX);
+    props.bronzeBucket.grantDelete(ops, BRONZE_PREFIX);
+    const results = s3.Bucket.fromBucketName(this, "LakeResults", props.lake.resultsBucketName);
+    results.grantRead(ops, "tenant=*");
+    results.grantDelete(ops, "tenant=*");
+    const arn = (service: string, resource: string) =>
+      `arn:aws:${service}:${this.region}:${this.account}:${resource}`;
+    ops.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ["s3tables:DeleteTable", "s3tables:DeleteNamespace"],
+        resources: [props.lake.tableBucketArn, `${props.lake.tableBucketArn}/*`],
+      }),
+    );
+    ops.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ["athena:DeleteWorkGroup"],
+        resources: [arn("athena", `workgroup/mm-${cfg.stage}-t-*`)],
+      }),
+    );
+    ops.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ["iam:DeleteRole", "iam:DeleteRolePolicy"],
+        resources: [props.lake.tenantRolePathArn],
+      }),
+    );
+    // Only tenant lake keys (tagged at provisioning) can be scheduled for deletion.
+    ops.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ["kms:DescribeKey", "kms:ScheduleKeyDeletion"],
+        resources: [arn("kms", "key/*")],
+        conditions: { StringEquals: { "aws:ResourceTag/mm:purpose": "lake-tenant" } },
+      }),
+    );
+    ops.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ["kms:DescribeKey", "kms:DeleteAlias"],
+        resources: [arn("kms", `alias/mastermind/${cfg.stage}/lake/*`)],
+      }),
+    );
+    ops.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ["kms:DeleteAlias"],
+        resources: [arn("kms", "key/*")],
+        conditions: { StringEquals: { "aws:ResourceTag/mm:purpose": "lake-tenant" } },
+      }),
+    );
+    // Restore drill: restore to a temporary instance named mm-restore-drill-*, then delete it.
+    ops.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ["rds:DescribeDBInstances"],
+        resources: ["*"],
+      }),
+    );
+    ops.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ["rds:RestoreDBInstanceToPointInTime", "rds:AddTagsToResource"],
+        resources: [
+          props.db.instanceArn,
+          arn("rds", "db:mm-restore-drill-*"),
+          arn("rds", "subgrp:*"),
+          arn("rds", "pg:*"),
+          arn("rds", "og:*"),
+        ],
+      }),
+    );
+    ops.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ["rds:DeleteDBInstance"],
+        resources: [arn("rds", "db:mm-restore-drill-*")],
+      }),
+    );
+    props.evidenceBucket.grantPut(ops, "restore-drills/*");
+    const opsSg = new ec2.SecurityGroup(this, "OpsSg", {
+      vpc: props.vpc,
+      description: "One-off ops tasks (purge, restore drill)",
+    });
+    new CfnOutput(this, "OpsTaskDefinition", { value: opsTask.taskDefinitionArn });
+    new CfnOutput(this, "OpsSecurityGroup", { value: opsSg.securityGroupId });
+    new CfnOutput(this, "ClusterName", { value: cluster.clusterName });
+
     // Only app tasks may reach Postgres. The rules live in this stack so the data stack
     // never depends on the app stack.
-    const toPostgres: [string, ecs.FargateService][] = [
-      ["Web", web.service],
-      ["Api", api],
-      ["Gateway", gateway],
-      ["Worker", worker],
+    const toPostgres: [string, string][] = [
+      ["Web", web.service.connections.securityGroups[0]!.securityGroupId],
+      ["Api", api.connections.securityGroups[0]!.securityGroupId],
+      ["Gateway", gateway.connections.securityGroups[0]!.securityGroupId],
+      ["Worker", worker.connections.securityGroups[0]!.securityGroupId],
+      ["Ops", opsSg.securityGroupId],
     ];
-    for (const [name, service] of toPostgres) {
+    for (const [name, sourceSecurityGroupId] of toPostgres) {
       new ec2.CfnSecurityGroupIngress(this, `${name}ToPostgres`, {
         groupId: props.dbSecurityGroup.securityGroupId,
-        sourceSecurityGroupId: service.connections.securityGroups[0]!.securityGroupId,
+        sourceSecurityGroupId,
         ipProtocol: "tcp",
         fromPort: 5432,
         toPort: 5432,

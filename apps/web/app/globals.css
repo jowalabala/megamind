@@ -187,3 +187,27 @@ a.button {
   color: var(--accent-fg);
   text-decoration: none;
 }
+
+/* Pilot dashboard */
+.checklist {
+  list-style: none;
+  padding: 0;
+}
+.checklist li {
+  padding: 0.25rem 0;
+}
+.checklist .done {
+  color: #2f7d4f;
+}
+.bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.4rem;
+  height: 6rem;
+}
+.bars div {
+  flex: 1;
+  background: #5b6ee1;
+  min-height: 2px;
+  border-radius: 2px 2px 0 0;
+}

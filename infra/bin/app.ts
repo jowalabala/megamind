@@ -4,6 +4,7 @@ import { stageConfig } from "../lib/config.ts";
 import { DataStack } from "../lib/data-stack.ts";
 import { LakeStack } from "../lib/lake-stack.ts";
 import { NetworkStack } from "../lib/network-stack.ts";
+import { SecurityStack } from "../lib/security-stack.ts";
 
 const app = new App();
 const cfg = stageConfig(app.node.tryGetContext("stage"));
@@ -16,6 +17,11 @@ const prefix = `MasterMind-${cfg.stage}`;
 const network = new NetworkStack(app, `${prefix}-Network`, cfg, { env });
 const data = new DataStack(app, `${prefix}-Data`, cfg, { env, vpc: network.vpc });
 const lake = new LakeStack(app, `${prefix}-Lake`, cfg, { env });
+const security = new SecurityStack(app, `${prefix}-Security`, cfg, {
+  env,
+  bronzeBucket: data.bronzeBucket,
+  alertEmail: app.node.tryGetContext("alertEmail"),
+});
 new AppStack(app, `${prefix}-App`, cfg, {
   env,
   vpc: network.vpc,
@@ -28,7 +34,9 @@ new AppStack(app, `${prefix}-App`, cfg, {
     streamArn: lake.streamArn,
     tableBucketArn: lake.tableBucketArn,
     tenantRolePathArn: lake.tenantRolePathArn,
+    resultsBucketName: lake.resultsBucketName,
   },
+  evidenceBucket: security.evidenceBucket,
 });
 
 Tags.of(app).add("project", "master-mind");

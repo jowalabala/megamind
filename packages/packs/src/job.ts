@@ -17,7 +17,7 @@ import {
   type CategorizeInput,
   type CategoryDecision,
 } from "./categorize.ts";
-import type { Pack } from "./schema.ts";
+import { resolvePacks, type PackSource } from "./tenant.ts";
 
 export interface CategorizeJob {
   tenantId: string;
@@ -26,7 +26,7 @@ export interface CategorizeJob {
 
 export interface CategorizeDeps {
   db: MasterMindDb;
-  packs: Pack[];
+  packs: PackSource;
   /** Null disables the model step (local development without Bedrock). */
   llm: Llm | null;
 }
@@ -57,7 +57,8 @@ export async function categorizeTask(
   if (!loaded) return null; // deleted (e.g. erased) since the job was queued
   const { task, pr, refs, session } = loaded;
 
-  const pack = choosePack(deps.packs, {
+  const { current } = await resolvePacks(deps.packs, job.tenantId);
+  const pack = choosePack(current, {
     source: task.source,
     refSystems: [...new Set(refs.map((r) => r.split(":")[0]!))],
     codeSession: typeof session?.context?.repo === "string",

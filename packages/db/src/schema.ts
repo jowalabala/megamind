@@ -44,6 +44,8 @@ export const tenants = pgTable("tenants", {
   kmsKeyArn: text("kms_key_arn"),
   createdAt: createdAt(),
   lakeReadyAt: timestamp("lake_ready_at", { withTimezone: true }),
+  /** Set while deletion is scheduled: agent keys, webhooks and jobs stop for this tenant. */
+  suspendedAt: timestamp("suspended_at", { withTimezone: true }),
 });
 
 export const teams = pgTable("teams", {
@@ -824,6 +826,94 @@ export const notifications = pgTable("notifications", {
   sentAt: timestamp("sent_at", { withTimezone: true }),
 });
 
+/** A tenant's own version of a pack (the generic pack, in the MVP). Append-only. */
+export const tenantPacks = pgTable(
+  "tenant_packs",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    packId: text("pack_id").notNull(),
+    version: integer("version").notNull(),
+    yaml: text("yaml").notNull(),
+    createdByMemberId: uuid("created_by_member_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.packId, t.version] })],
+);
+
+export interface ImportProblem {
+  line: number;
+  problem: string;
+}
+
+export const outcomeImports = pgTable("outcome_imports", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id").notNull(),
+  memberId: uuid("member_id"),
+  rows: integer("rows").notNull(),
+  stored: integer("stored").notNull(),
+  problems: jsonb("problems").$type<ImportProblem[]>().notNull().default([]),
+  createdAt: createdAt(),
+});
+
+export interface EmailCounts {
+  sent: number;
+  delivered: number;
+  opened: number;
+  clicked: number;
+  unsubscribed: number;
+  as_of: string;
+}
+
+export const hubspotMarketingEmails = pgTable(
+  "hubspot_marketing_emails",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    taskId: uuid("task_id").notNull(),
+    connectionId: uuid("connection_id"),
+    emailId: text("email_id").notNull(),
+    ownerUserId: bigint("owner_user_id", { mode: "number" }),
+    publishedAt: timestamp("published_at", { withTimezone: true }).notNull(),
+    counts: jsonb("counts").$type<Partial<EmailCounts>>().notNull().default({}),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+    metricsFinalAt: timestamp("metrics_final_at", { withTimezone: true }),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.taskId] })],
+);
+
+export const hubspotDeals = pgTable(
+  "hubspot_deals",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    taskId: uuid("task_id").notNull(),
+    connectionId: uuid("connection_id"),
+    dealId: text("deal_id").notNull(),
+    ownerUserId: bigint("owner_user_id", { mode: "number" }),
+    pipeline: text("pipeline"),
+    stage: text("stage"),
+    dealType: text("deal_type"),
+    createdAtHs: timestamp("created_at_hs", { withTimezone: true }).notNull(),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    isClosed: boolean("is_closed").notNull().default(false),
+    isWon: boolean("is_won").notNull().default(false),
+    syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
+    metricsFinalAt: timestamp("metrics_final_at", { withTimezone: true }),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.taskId] })],
+);
+
+export const TENANT_DELETION_STATUSES = ["scheduled", "cancelled", "purging", "purged"] as const;
+
+export const tenantDeletions = pgTable("tenant_deletions", {
+  tenantId: uuid("tenant_id").primaryKey(),
+  requestedByMemberId: uuid("requested_by_member_id").notNull(),
+  requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
+  purgeAfter: timestamp("purge_after", { withTimezone: true }).notNull(),
+  status: text("status", { enum: TENANT_DELETION_STATUSES }).notNull().default("scheduled"),
+  steps: jsonb("steps").$type<Record<string, string>>().notNull().default({}),
+  purgedAt: timestamp("purged_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 /** Every Drizzle table, used by the drift test. */
 export const allTables = {
   tenants,
@@ -868,4 +958,9 @@ export const allTables = {
   skillUsage,
   skillMeasurements,
   notifications,
+  tenantPacks,
+  outcomeImports,
+  hubspotMarketingEmails,
+  hubspotDeals,
+  tenantDeletions,
 };

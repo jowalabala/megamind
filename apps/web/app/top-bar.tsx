@@ -15,7 +15,9 @@ export function TopBar({ tenantName, email }: { tenantName: string; email: strin
         <a href="/settings/members">Members</a>
         <a href="/settings/agents">Agents</a>
         <a href="/settings/integrations">Integrations</a>
+        <a href="/settings/metrics">Metrics</a>
         <a href="/settings/privacy">Privacy</a>
+        <a href="/settings/organization">Organization</a>
         <span className="muted">{email}</span>
         <form action={doSignOut}>
           <button className="link" type="submit">

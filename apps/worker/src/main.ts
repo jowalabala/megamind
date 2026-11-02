@@ -20,7 +20,7 @@ import {
 import { bedrockTransport, createLlm, dbCallLogger, modelConfigFromEnv } from "@mm/llm";
 import {
   attributeTasks,
-  builtinPacks,
+  tenantPackLoader,
   categorizeTask,
   judgeSweep,
   type CategorizeJob,
@@ -78,7 +78,8 @@ const llm =
         models: modelConfigFromEnv(),
         log: dbCallLogger(db),
       });
-const packs = builtinPacks();
+// Built-in packs, with each tenant's own edited generic pack in place of the built-in one.
+const packs = tenantPackLoader(db);
 await queue.work<CategorizeJob>("categorize.task", async (job) => {
   const d = await categorizeTask({ db, packs, llm }, job.data);
   log("categorize.done", {

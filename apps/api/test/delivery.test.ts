@@ -164,6 +164,10 @@ function fakeServer(): Server {
       }
       return json(200, { results: mine.map((s) => ({ id: s.id, name: s.name })) });
     }
+    // Marketing emails and deals are covered by the week 10 scenario.
+    if (p === "/hubspot/marketing/v3/emails" || p === "/hubspot/crm/v3/objects/deals") {
+      return json(200, { results: [] });
+    }
     if (p === "/hubspot/crm/v3/objects/contacts/search") {
       const q = JSON.parse(text) as {
         filterGroups: { filters: { propertyName: string; value: string }[] }[];

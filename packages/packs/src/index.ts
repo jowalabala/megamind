@@ -13,7 +13,10 @@ export {
 export { categorizeTask, type CategorizeDeps, type CategorizeJob } from "./job.ts";
 export { builtinPacks, PackError, parsePack } from "./load.ts";
 export {
+  judgeFor,
   judgeSchema,
+  judgeVersion,
+  packJudges,
   packSchema,
   ruleSchema,
   type Condition,
@@ -40,3 +43,24 @@ export {
   jaccard,
   titleWords,
 } from "./attribution.ts";
+export {
+  editablePack,
+  packToYaml,
+  parseTenantPack,
+  resolvePacks,
+  TENANT_EDITABLE_PACKS,
+  tenantPackLoader,
+  type PackSource,
+  type TenantPackSet,
+} from "./tenant.ts";
+export {
+  CSV_LIMITS,
+  CsvError,
+  importOutcomes,
+  parseCsv,
+  readOutcomeCsv,
+  unitProblem,
+  type ImportDeps,
+  type ImportResult,
+  type OutcomeRow,
+} from "./outcomes-csv.ts";

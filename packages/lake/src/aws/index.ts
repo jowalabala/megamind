@@ -9,3 +9,8 @@ export {
   type LakeProvisionConfig,
   type ProvisionResult,
 } from "./provision.ts";
+export {
+  deprovisionTenantLake,
+  type DeprovisionResult,
+  type LakeDeprovisionClients,
+} from "./deprovision.ts";

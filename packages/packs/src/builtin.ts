@@ -148,10 +148,11 @@ judge:
   baseline: { days: 180, min_samples: 20 }
 `;
 
-// Week 9 covers HubSpot sequences; marketing emails and deals come with the full revenue pack.
+// Sales and marketing work from HubSpot: sequences, marketing emails and deals. Each kind has
+// its own rule set, since their outcomes are measured differently.
 export const REVENUE_PACK = `
 id: revenue
-version: 1
+version: 2
 name: Revenue
 description: Sales and marketing work, from HubSpot and from agents working in it.
 applies_to:
@@ -179,9 +180,47 @@ categories:
     rules:
       - labels_any: [sequence]
 
+  - id: newsletter
+    name: Newsletter
+    description: A recurring marketing email (newsletter, digest, product update roundup).
+    rules:
+      - labels_any: [marketing_email]
+        title: '(newsletter|digest|roundup|round-up|monthly|weekly|bulletin)'
+
+  - id: event_email
+    name: Event email
+    description: A marketing email inviting people to an event or webinar, or following up on one.
+    rules:
+      - labels_any: [marketing_email]
+        title: '(webinar|event|invite|invitation|register|summit|conference|meetup|workshop)'
+
+  - id: campaign_email
+    name: Campaign email
+    description: Any other marketing email (launch, promotion, announcement).
+    rules:
+      - labels_any: [marketing_email]
+
+  - id: new_business_deal
+    name: New business deal
+    description: A deal with a new customer.
+    rules:
+      - labels_any: [deal_type_newbusiness]
+
+  - id: expansion_deal
+    name: Expansion deal
+    description: A deal with an existing customer (upsell, renewal, expansion).
+    rules:
+      - labels_any: [deal_type_existingbusiness]
+
+  - id: deal
+    name: Other deal
+    description: A deal of another or unknown type.
+    rules:
+      - labels_any: [deal]
+
   - id: other
     name: Other
-    description: Revenue work that isn't a sequence.
+    description: Revenue work that isn't a sequence, marketing email or deal.
 
 fallback: other
 
@@ -189,20 +228,47 @@ features:
   - { id: steps, description: Steps in the sequence. }
   - { id: email_steps, description: Automated or manual email steps. }
   - { id: task_steps, description: Task steps (calls, LinkedIn, manual work). }
+  - { id: email_type, description: HubSpot's email type (batch, A/B, automated). }
+  - { id: ab_test, description: The email was an A/B test. }
+  - { id: pipeline, description: The deal's pipeline. }
 
 metrics:
   - { id: sequence.reply_rate, description: Share of enrolled contacts who replied after enrolling., unit: ratio, better: higher, window_days: 30 }
   - { id: sequence.meeting_rate, description: Share of enrolled contacts who booked a meeting after enrolling., unit: ratio, better: higher, window_days: 30 }
+  - { id: email.open_rate, description: Opens over delivered. Inflated by mail privacy features; shown but not judged., unit: ratio, better: higher, window_days: 7 }
+  - { id: email.click_rate, description: Clicks over delivered., unit: ratio, better: higher, window_days: 7 }
+  - { id: email.unsubscribe_rate, description: Unsubscribes over delivered., unit: ratio, better: lower, window_days: 7 }
+  - { id: deal.won, description: The deal closed won (1) or lost (0)., unit: boolean, better: higher }
+  - { id: deal.days_to_close, description: Days from creating the deal to closing it., unit: count, better: lower }
 
-judge:
-  version: 1
-  requires: [sequence.reply_rate]
-  skip_categories: [other]
-  failure_if_any:
-    - { metric: sequence.reply_rate, op: lt, baseline: p25 }
-  success_if_all:
-    - { metric: sequence.reply_rate, op: gte, baseline: p75 }
-  baseline: { days: 365, min_samples: 10 }
+judges:
+  - version: 2
+    categories: [prospecting_sequence, follow_up_sequence, sequence]
+    requires: [sequence.reply_rate]
+    failure_if_any:
+      - { metric: sequence.reply_rate, op: lt, baseline: p25 }
+    success_if_all:
+      - { metric: sequence.reply_rate, op: gte, baseline: p75 }
+    baseline: { days: 365, min_samples: 10 }
+
+  # Clicks, not opens: opens are inflated by mail privacy features.
+  - version: 2
+    categories: [newsletter, event_email, campaign_email]
+    requires: [email.click_rate, email.unsubscribe_rate]
+    failure_if_any:
+      - { metric: email.click_rate, op: lt, baseline: p25 }
+    success_if_all:
+      - { metric: email.click_rate, op: gte, baseline: p75 }
+      - { metric: email.unsubscribe_rate, op: lte, baseline: p75 }
+    baseline: { days: 365, min_samples: 10 }
+
+  - version: 2
+    categories: [new_business_deal, expansion_deal, deal]
+    requires: [deal.won]
+    failure_if_any:
+      - { metric: deal.won, op: eq, value: 0 }
+    success_if_all:
+      - { metric: deal.won, op: eq, value: 1 }
 `;
 
 export const GENERIC_PACK = `

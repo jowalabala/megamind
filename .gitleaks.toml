@@ -1,0 +1,12 @@
+# Secret scanning (CI: .github/workflows/security.yml). The default rules, minus files that
+# hold fake secrets on purpose: the redaction corpus and tests that check secrets get removed.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Deliberately fake secrets used to test redaction and auth"
+paths = [
+  '''^packages/privacy/corpus/''',
+  '''(^|/)test/''',
+  '''\.test\.ts$''',
+]

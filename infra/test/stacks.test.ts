@@ -7,6 +7,7 @@ import { STAGES } from "../lib/config.ts";
 import { DataStack } from "../lib/data-stack.ts";
 import { LakeStack } from "../lib/lake-stack.ts";
 import { NetworkStack } from "../lib/network-stack.ts";
+import { SecurityStack } from "../lib/security-stack.ts";
 
 function synth(stage: "dev" | "prod") {
   const app = new App();
@@ -98,6 +99,7 @@ describe("app stack (api, worker, web)", () => {
   const network = new NetworkStack(app, "Net", cfg);
   const data = new DataStack(app, "Data", cfg, { vpc: network.vpc });
   const lake = new LakeStack(app, "Lake", cfg);
+  const security = new SecurityStack(app, "Security", cfg, { bronzeBucket: data.bronzeBucket });
   const stack = new AppStack(app, "App", cfg, {
     vpc: network.vpc,
     db: data.db,
@@ -109,7 +111,9 @@ describe("app stack (api, worker, web)", () => {
       streamArn: lake.streamArn,
       tableBucketArn: lake.tableBucketArn,
       tenantRolePathArn: lake.tenantRolePathArn,
+      resultsBucketName: lake.resultsBucketName,
     },
+    evidenceBucket: security.evidenceBucket,
   });
   const t = Template.fromStack(stack);
 
@@ -189,11 +193,17 @@ describe("app stack (api, worker, web)", () => {
     expect(secretsOf("worker")).toEqual(["MM_GITHUB_APP_ID", "MM_GITHUB_PRIVATE_KEY"]);
   });
 
-  it("web, api, gateway and worker each get their own Postgres ingress rule, nothing else", () => {
-    const rules = Object.values(t.findResources("AWS::EC2::SecurityGroupIngress")).filter(
-      (r) => (r as { Properties: { FromPort: number } }).Properties.FromPort === 5432,
+  it("web, api, gateway, worker and the ops task each get their own Postgres rule, nothing else", () => {
+    const rules = Object.entries(t.findResources("AWS::EC2::SecurityGroupIngress")).filter(
+      ([, r]) => (r as { Properties: { FromPort: number } }).Properties.FromPort === 5432,
     );
-    expect(rules).toHaveLength(4);
+    expect(rules.map(([id]) => id.replace(/ToPostgres.*/, "")).sort()).toEqual([
+      "Api",
+      "Gateway",
+      "Ops",
+      "Web",
+      "Worker",
+    ]);
   });
 
   it("routes /ws to the gateway, which shares only its token secret with the API", () => {
@@ -313,4 +323,98 @@ describe.each(["dev", "prod"] as const)("lake stack (%s)", (stage) => {
     t.resourceCountIs("AWS::Glue::Catalog", cfg.lakeIntegration === "create" ? 1 : 0);
     t.resourceCountIs("AWS::LakeFormation::Resource", cfg.lakeIntegration === "create" ? 1 : 0);
   });
+});
+
+describe("ops task", () => {
+  const app = new App({ context: { "aws:cdk:disable-asset-staging": true } });
+  const cfg = STAGES.prod;
+  const network = new NetworkStack(app, "Net", cfg);
+  const data = new DataStack(app, "Data", cfg, { vpc: network.vpc });
+  const lake = new LakeStack(app, "Lake", cfg);
+  const security = new SecurityStack(app, "Security", cfg, { bronzeBucket: data.bronzeBucket });
+  const t = Template.fromStack(
+    new AppStack(app, "App", cfg, {
+      vpc: network.vpc,
+      db: data.db,
+      dbSecurityGroup: data.dbSecurityGroup,
+      appDbSecret: data.appDbSecret,
+      bronzeBucket: data.bronzeBucket,
+      lake: {
+        streamName: lake.streamName,
+        streamArn: lake.streamArn,
+        tableBucketArn: lake.tableBucketArn,
+        tenantRolePathArn: lake.tenantRolePathArn,
+        resultsBucketName: lake.resultsBucketName,
+      },
+      evidenceBucket: security.evidenceBucket,
+    }),
+  );
+  const statements = Object.entries(t.findResources("AWS::IAM::Policy"))
+    .filter(([id]) => id.startsWith("OpsTaskTaskRole"))
+    .flatMap(
+      ([, p]) =>
+        (
+          p as {
+            Properties: {
+              PolicyDocument: {
+                Statement: { Action: string | string[]; Resource: unknown; Condition?: unknown }[];
+              };
+            };
+          }
+        ).Properties.PolicyDocument.Statement,
+    );
+
+  it("can only schedule deletion of tenant lake keys, and delete only drill instances", () => {
+    const keyDeletion = statements.filter((s) =>
+      [s.Action].flat().includes("kms:ScheduleKeyDeletion"),
+    );
+    expect(keyDeletion).toHaveLength(1);
+    expect(keyDeletion[0]!.Condition).toEqual({
+      StringEquals: { "aws:ResourceTag/mm:purpose": "lake-tenant" },
+    });
+    const rdsDelete = statements.filter((s) => [s.Action].flat().includes("rds:DeleteDBInstance"));
+    expect(JSON.stringify(rdsDelete.map((s) => s.Resource))).toContain("db:mm-restore-drill-*");
+    expect(JSON.stringify(rdsDelete.map((s) => s.Resource))).not.toContain('"*"');
+  });
+
+  it("is a task definition, never a running service", () => {
+    const services = t.findResources("AWS::ECS::Service");
+    expect(JSON.stringify(services)).not.toContain("OpsTask");
+  });
+});
+
+describe("security stack", () => {
+  it.each(["dev", "prod"] as const)(
+    "%s: a validated multi-region trail and locked evidence",
+    (stage) => {
+      const app = new App();
+      const cfg = STAGES[stage];
+      const network = new NetworkStack(app, "Net", cfg);
+      const data = new DataStack(app, "Data", cfg, { vpc: network.vpc });
+      const t = Template.fromStack(
+        new SecurityStack(app, "Security", cfg, { bronzeBucket: data.bronzeBucket }),
+      );
+      t.hasResourceProperties("AWS::CloudTrail::Trail", {
+        IsMultiRegionTrail: true,
+        EnableLogFileValidation: true,
+        KMSKeyId: Match.anyValue(),
+      });
+      t.hasResourceProperties("AWS::S3::Bucket", {
+        ObjectLockEnabled: true,
+        ObjectLockConfiguration: Match.objectLike({
+          Rule: {
+            DefaultRetention: Match.objectLike({
+              Mode: stage === "prod" ? "COMPLIANCE" : "GOVERNANCE",
+            }),
+          },
+        }),
+      });
+      // Account-level services are created once (by dev here) and assumed by prod.
+      t.resourceCountIs("AWS::GuardDuty::Detector", stage === "dev" ? 1 : 0);
+      t.resourceCountIs("AWS::SecurityHub::Standard", stage === "dev" ? 2 : 0);
+      t.hasResourceProperties("AWS::Events::Rule", {
+        EventPattern: Match.objectLike({ source: ["aws.guardduty", "aws.securityhub"] }),
+      });
+    },
+  );
 });

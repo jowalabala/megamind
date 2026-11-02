@@ -20,7 +20,7 @@ const MESSAGES: Record<string, string> = {
   not_your_installation: "Your GitHub account can't access that installation.",
   other_workspace: "That account is already connected to another workspace.",
   hubspot_installed:
-    "HubSpot is connected. Sequences are imported within half an hour; their results follow once they're 30 days old.",
+    "HubSpot is connected. Sequences, marketing emails and deals are imported within half an hour; results follow as they become final.",
   slack_installed:
     "Slack is connected. Channel approvals and skill updates now arrive as direct messages.",
   hubspot_not_configured: "The HubSpot app isn't configured on this server yet.",
@@ -133,9 +133,11 @@ export default async function IntegrationsPage({
         <h2>HubSpot</h2>
         <div className="card">
           <p className="muted">
-            Read-only. Sequences (names and step counts) and, for each one, how many enrolled
-            contacts replied or booked a meeting. Contact names, emails and message contents are
-            never requested or stored: only counts.
+            Read-only. Sequences (names and step counts) with how many enrolled contacts replied or
+            booked a meeting; published marketing emails with their delivery, click and unsubscribe
+            counts; and deals with their stage and outcome. Contact names, emails, message contents
+            and deal amounts are never requested or stored. Connected before November 2026?
+            Reconnect once to allow marketing emails and deals.
           </p>
           {hubspot.map((c) => (
             <p key={c.id}>

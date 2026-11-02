@@ -17,6 +17,8 @@ export interface StageConfig {
    * "create" makes it in the lake stack; "existing" assumes it was set up already.
    */
   lakeIntegration: "create" | "existing";
+  /** GuardDuty, Security Hub and Config are per account and region, like the lake integration. */
+  securityServices: "create" | "existing";
 }
 
 export const STAGES: Record<Stage, StageConfig> = {
@@ -32,6 +34,7 @@ export const STAGES: Record<Stage, StageConfig> = {
     gatewayDesiredCount: 1,
     workerDesiredCount: 1,
     lakeIntegration: "create",
+    securityServices: "create",
   },
   prod: {
     stage: "prod",
@@ -46,6 +49,7 @@ export const STAGES: Record<Stage, StageConfig> = {
     workerDesiredCount: 1,
     // Prod shares the account-level integration with dev when both live in one account.
     lakeIntegration: "existing",
+    securityServices: "existing",
   },
 };
 

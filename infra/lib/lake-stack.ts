@@ -25,6 +25,7 @@ export class LakeStack extends Stack {
   readonly streamName: string;
   readonly streamArn: string;
   readonly tenantRolePathArn: string;
+  readonly resultsBucketName: string;
 
   constructor(scope: Construct, id: string, cfg: StageConfig, props: StackProps = {}) {
     super(scope, id, props);
@@ -136,6 +137,7 @@ export class LakeStack extends Stack {
     const errors = encryptedBucket("FirehoseErrors", 30);
     // Athena results, under tenant=<id>/ and encrypted with the tenant's key by its workgroup.
     const results = encryptedBucket("AthenaResults", 7);
+    this.resultsBucketName = results.bucketName;
 
     const firehoseRole = new iam.Role(this, "FirehoseRole", {
       assumedBy: new iam.ServicePrincipal("firehose.amazonaws.com", {

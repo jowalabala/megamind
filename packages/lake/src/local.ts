@@ -1,7 +1,7 @@
 // A stand-in lake for development and tests: newline-delimited JSON per tenant and table,
 // in memory or under a git-ignored directory. Same interfaces as the AWS lake, including
 // at-least-once delivery (readers de-duplicate on event_id) and member deletes.
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tenantNamespace } from "./naming.ts";
 import { LAKE_TABLES, type LakeTableName } from "./tables.ts";
@@ -13,6 +13,7 @@ interface Storage {
   append(ns: string, table: LakeTableName, rows: Row[]): Promise<void>;
   read(ns: string, table: LakeTableName): Promise<Row[]>;
   write(ns: string, table: LakeTableName, rows: Row[]): Promise<void>;
+  drop(ns: string): Promise<void>;
 }
 
 function memoryStorage(): Storage {
@@ -27,6 +28,9 @@ function memoryStorage(): Storage {
     },
     async write(ns, t, rows) {
       data.set(key(ns, t), structuredClone(rows));
+    },
+    async drop(ns) {
+      for (const k of [...data.keys()]) if (k.startsWith(`${ns}/`)) data.delete(k);
     },
   };
 }
@@ -59,6 +63,9 @@ function fileStorage(dir: string): Storage {
         mode: 0o600,
       });
     },
+    async drop(ns) {
+      await rm(join(root, ns), { recursive: true, force: true });
+    },
   };
 }
 
@@ -69,7 +76,11 @@ function dedupe(rows: Row[]): Row[] {
 }
 
 export type LocalLake = LakeSink &
-  LakeAdmin & { rows(tenantId: string, table: LakeTableName): Promise<Row[]> };
+  LakeAdmin & {
+    rows(tenantId: string, table: LakeTableName): Promise<Row[]>;
+    /** Removes the tenant's whole namespace (tenant deletion). */
+    dropTenant(tenantId: string): Promise<void>;
+  };
 
 const belongsTo = (s: ErasureSubject) => (r: Row) =>
   r.member_id === s.memberId || s.actorKeys.includes(String(r.actor_key));
@@ -107,6 +118,9 @@ export function localLake(options: { dir?: string } = {}): LocalLake {
           rows.filter((r) => !mine(r)),
         );
       }
+    },
+    async dropTenant(tenantId) {
+      await storage.drop(tenantNamespace(tenantId));
     },
     async rows(tenantId, table) {
       return dedupe(await storage.read(tenantNamespace(tenantId), table));
