@@ -1,5 +1,5 @@
 # Build from the repo root: docker build -f apps/web/Dockerfile .
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 RUN corepack enable 2>/dev/null || npm install -g pnpm@10.34.9
 WORKDIR /repo
 COPY . .
@@ -8,7 +8,7 @@ ARG NEXT_PUBLIC_WORKOS_REDIRECT_URI
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm --filter @mm/web build
 
-FROM node:22-alpine AS run
+FROM node:26-alpine AS run
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
 WORKDIR /app
 RUN addgroup -S app && adduser -S app -G app
