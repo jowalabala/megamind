@@ -65,14 +65,14 @@ jobs:
       - run: docker build -f apps/api/Dockerfile -t mastermind-services:scan .
       - run: docker build -f apps/web/Dockerfile -t mastermind-web:scan .
       - name: Scan the services image
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: mastermind-services:scan
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: "1"
       - name: Scan the web image
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: mastermind-web:scan
           severity: CRITICAL,HIGH
