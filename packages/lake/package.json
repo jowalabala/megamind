@@ -14,17 +14,17 @@
     "check": "tsx src/cli/check.ts"
   },
   "dependencies": {
-    "@aws-sdk/client-athena": "^3.1160.0",
-    "@aws-sdk/client-firehose": "^3.1160.0",
-    "@aws-sdk/client-iam": "^3.1160.0",
-    "@aws-sdk/client-kms": "^3.1160.0",
-    "@aws-sdk/client-lakeformation": "^3.1160.0",
-    "@aws-sdk/client-s3tables": "^3.1160.0",
-    "@aws-sdk/client-sts": "^3.1160.0",
+    "@aws-sdk/client-athena": "^3.1161.0",
+    "@aws-sdk/client-firehose": "^3.1161.0",
+    "@aws-sdk/client-iam": "^3.1161.0",
+    "@aws-sdk/client-kms": "^3.1161.0",
+    "@aws-sdk/client-lakeformation": "^3.1161.0",
+    "@aws-sdk/client-s3tables": "^3.1161.0",
+    "@aws-sdk/client-sts": "^3.1161.0",
     "@mm/audit": "workspace:*",
     "@mm/db": "workspace:*",
     "zod": "^4.1.0",
-    "@aws-sdk/client-s3": "^3.1160.0"
+    "@aws-sdk/client-s3": "^3.1161.0"
   },
   "devDependencies": {
     "@types/pg": "^8.15.0",
