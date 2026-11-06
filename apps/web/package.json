@@ -20,7 +20,7 @@
     "@mm/skills": "workspace:*",
     "@mm/slack": "workspace:*",
     "@mm/vault": "workspace:*",
-    "@workos-inc/authkit-nextjs": "^2.17.0",
+    "@workos-inc/authkit-nextjs": "^4.6.2",
     "@workos-inc/node": "^8.0.0",
     "next": "~15.5.28",
     "react": "~19.1.10",
