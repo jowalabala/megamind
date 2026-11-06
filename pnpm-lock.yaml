@@ -195,8 +195,8 @@ importers:
         specifier: ^2.17.0
         version: 2.17.0(next@15.5.28(@opentelemetry/api@1.10.0)(@types/node@22.20.5)(react-dom@19.1.10(react@19.1.10))(react@19.1.10))(react-dom@19.1.10(react@19.1.10))(react@19.1.10)
       '@workos-inc/node':
-        specifier: ^8.0.0
-        version: 8.13.0
+        specifier: ^12.1.0
+        version: 12.1.0
       next:
         specifier: ~15.5.28
         version: 15.5.28(@opentelemetry/api@1.10.0)(@types/node@22.20.5)(react-dom@19.1.10(react@19.1.10))(react@19.1.10)
@@ -1624,6 +1624,7 @@ packages:
   '@smithy/core@3.38.0':
     resolution: {integrity: sha512-aLyyCnK2p4yvNA2TaM+5owXqb+rZGSiUKEsNP329AzeYnERtAz7NrlTbRsaxqmZ0ooxwoID8LMm959UGQQDIsg==}
     engines: {node: '>=18.0.0'}
+    deprecated: Deprecated due to a bug in custom logger data redaction. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
 
   '@smithy/credential-provider-imds@4.5.2':
     resolution: {integrity: sha512-A9uSdn72ozbRUSit0eib0TW7nXuNPlaeM0zcGkJ+nE6tFcSDbnmtwoxbTCFBukVQcszDAyvsd7+rTduPTXpygg==}
@@ -1957,6 +1958,10 @@ packages:
       next: ^13.5.9 || ^14.2.26 || ^15.2.3 || ^16
       react: ^18.0 || ^19.0.0
       react-dom: ^18.0 || ^19.0.0
+
+  '@workos-inc/node@12.1.0':
+    resolution: {integrity: sha512-qT/RpDHti/MDR1r5Jkngg6gS7cpwzrRTB0DA4H/5UMD27t8qOcLqOkIrxVX4AOIzUQ0oJXn7l+c0kZZC/mrGiQ==}
+    engines: {node: '>=22.11.0'}
 
   '@workos-inc/node@8.13.0':
     resolution: {integrity: sha512-NgQKHpwh8AbT4KvAsW91Y+4f4jja2IvFPQ5atcy5NUxUMVRgXzRFEee3erawfXrTmiCVqJjd9PljHySKBXmHKQ==}
@@ -5181,6 +5186,8 @@ snapshots:
       path-to-regexp: 6.3.0
       react: 19.1.10
       react-dom: 19.1.10(react@19.1.10)
+
+  '@workos-inc/node@12.1.0': {}
 
   '@workos-inc/node@8.13.0':
     dependencies:
