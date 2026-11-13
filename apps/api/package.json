@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@fastify/rate-limit": "^11.0.0",
+    "@fastify/rate-limit": "^11.2.2",
     "@mm/audit": "workspace:*",
     "@mm/awareness": "workspace:*",
     "@mm/collab": "workspace:*",
@@ -23,7 +23,7 @@
     "@mm/skills": "workspace:*",
     "@mm/slack": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "fastify": "^5.6.0",
+    "fastify": "^5.12.8",
     "zod": "^4.1.0"
   },
   "devDependencies": {
