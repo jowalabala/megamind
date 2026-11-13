@@ -16,7 +16,7 @@
     "@mm/db": "workspace:*",
     "@mm/ingest": "workspace:*",
     "@mm/realtime": "workspace:*",
-    "ws": "^8.18.0"
+    "ws": "^8.22.2"
   },
   "devDependencies": {
     "@mm/awareness": "workspace:*",
